@@ -8,6 +8,7 @@ st.title("📊 Ringkasan Broker")
 # Upload Excel file
 uploaded_file = st.file_uploader("Upload Excel File (Sheet1 expected)", type=["xlsx"])
 
+# Only proceed if a file is uploaded
 if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file, sheet_name="Sheet1")
@@ -21,7 +22,7 @@ if uploaded_file:
         else:
             df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
 
-            # Input fields with blank defaults
+            # Input fields (inside upload condition)
             col1, col2, col3 = st.columns([1, 1, 2])
 
             with col1:
@@ -58,10 +59,8 @@ if uploaded_file:
 
                     display_df = pd.DataFrame(records)
                     st.dataframe(display_df, use_container_width=True)
-            else:
-                st.info("Please select all required inputs to display the table.")
+            elif any([selected_brokers, selected_fields, date_from, date_to]):
+                st.info("Please complete all inputs to show the table.")
 
     except Exception as e:
         st.error(f"❌ Error reading Excel file: {e}")
-else:
-    st.info("Please upload an Excel file to begin.")
