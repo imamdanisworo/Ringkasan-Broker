@@ -20,11 +20,11 @@ if uploaded_file:
         else:
             df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
 
-            # Input section (with no defaults)
+            # Input fields with blank defaults
             col1, col2, col3 = st.columns([1, 1, 2])
 
             with col1:
-                selected_broker = st.selectbox("Select Broker", options=[""] + df["Broker"].tolist())
+                selected_brokers = st.multiselect("Select Broker(s)", options=df["Broker"].tolist())
 
             with col2:
                 selected_fields = st.multiselect("Select Fields", options=["Volume", "Nilai", "Frekuensi"])
@@ -34,27 +34,29 @@ if uploaded_file:
                 date_from = st.date_input("From", value=None, key="from_date")
                 date_to = st.date_input("To", value=None, key="to_date")
 
-            # Display table only when all fields are selected
-            if selected_broker and selected_fields and date_from and date_to:
+            # Display table only when all required inputs are set
+            if selected_brokers and selected_fields and date_from and date_to:
                 if date_from > date_to:
                     st.warning("⚠️ 'From' date must be before or equal to 'To' date.")
                 else:
-                    row = df[df["Broker"] == selected_broker].iloc[0]
-                    formatted_date_range = pd.date_range(date_from, date_to, freq="D").strftime('%d-%b-%y')
+                    date_range = pd.date_range(date_from, date_to, freq="D").strftime('%d-%b-%y')
 
-                    # Prepare display table
-                    result = pd.DataFrame([
-                        {
-                            "Date": date_str,
-                            "Field": field,
-                            "Broker": selected_broker,
-                            "Value": f"{row[field]:,.0f}" if pd.notna(row[field]) else ""
-                        }
-                        for date_str in formatted_date_range
-                        for field in selected_fields
-                    ])
+                    records = []
+                    for broker in selected_brokers:
+                        row = df[df["Broker"] == broker]
+                        if not row.empty:
+                            row_data = row.iloc[0]
+                            for date_str in date_range:
+                                for field in selected_fields:
+                                    records.append({
+                                        "Date": date_str,
+                                        "Field": field,
+                                        "Broker": broker,
+                                        "Value": row_data[field] if pd.notna(row_data[field]) else ""
+                                    })
 
-                    st.dataframe(result, use_container_width=True)
+                    display_df = pd.DataFrame(records)
+                    st.dataframe(display_df, use_container_width=True)
             else:
                 st.info("Please select all required inputs to display the table.")
 
