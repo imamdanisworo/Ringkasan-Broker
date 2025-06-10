@@ -104,3 +104,89 @@ if uploaded_files:
             st.info("Please complete all inputs including the date range to show the table.")
     else:
         st.warning("⚠️ No valid data found from uploaded files.")
+
+# ... all the previous code remains unchanged until this point ...
+
+if selected_brokers and selected_fields and date_from and date_to:
+    if date_from > date_to:
+        st.warning("⚠️ 'From' date must be before or equal to 'To' date.")
+    else:
+        filtered_df = combined_df[
+            (combined_df["Tanggal"].dt.date >= date_from) &
+            (combined_df["Tanggal"].dt.date <= date_to) &
+            (combined_df["Broker"].isin(selected_brokers))
+        ]
+
+        if filtered_df.empty:
+            st.info("No data matches the selected filters.")
+        else:
+            # Melt to vertical format
+            melted_df = filtered_df.melt(
+                id_vars=["Tanggal", "Broker"],
+                value_vars=selected_fields,
+                var_name="Field",
+                value_name="Value"
+            )
+
+            # Calculate total per day per field
+            total_df = melted_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
+            total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
+
+            # Merge total back into melted_df
+            merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"])
+            merged_df["Percentage"] = merged_df.apply(
+                lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
+                axis=1
+            )
+
+            # Format for display
+            display_df = merged_df.copy()
+            display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+            display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
+            display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
+            display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
+
+            st.dataframe(
+                display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]],
+                use_container_width=True
+            )
+
+            # 🔵 Chart: Raw Values
+            st.markdown("---")
+            st.subheader("📈 Chart - Raw Values")
+
+            for field in selected_fields:
+                chart_data = merged_df[merged_df["Field"] == field].dropna()
+                if not chart_data.empty:
+                    fig = px.line(
+                        chart_data,
+                        x="Tanggal",
+                        y="Value",
+                        color="Broker",
+                        title=f"{field} over Time",
+                        markers=True
+                    )
+                    fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(f"No data to chart for {field}.")
+
+            # 🟠 Chart: Percentages
+            st.markdown("---")
+            st.subheader("📊 Chart - Percentage Contribution (%)")
+
+            for field in selected_fields:
+                chart_data = merged_df[merged_df["Field"] == field].dropna()
+                if not chart_data.empty:
+                    fig = px.line(
+                        chart_data,
+                        x="Tanggal",
+                        y="Percentage",
+                        color="Broker",
+                        title=f"{field} Contribution (%) Over Time",
+                        markers=True
+                    )
+                    fig.update_layout(yaxis_title="Percentage (%)", xaxis_title="Tanggal")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(f"No percentage data to chart for {field}.")
