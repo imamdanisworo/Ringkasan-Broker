@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import datetime
 
 st.set_page_config(page_title="Financial Broker Summary", layout="wide")
 st.title("📊 Ringkasan Broker")
@@ -52,7 +53,7 @@ if uploaded_file:
                                         "Date": date_str,
                                         "Field": field,
                                         "Broker": broker,
-                                        "Value": row_data[field] if pd.notna(row_data[field]) else ""
+                                        "Value": f"{row_data[field]:,.0f}" if pd.notna(row_data[field]) else ""
                                     })
 
                     display_df = pd.DataFrame(records)
