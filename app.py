@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 from datetime import datetime
+import plotly.express as px
 
 st.set_page_config(page_title="Financial Broker Summary", layout="wide")
 st.title("📊 Ringkasan Broker")
@@ -71,14 +72,33 @@ if uploaded_files:
                         value_name="Value"
                     )
 
-                    # Format values and tanggal
-                    melted_df["Value"] = melted_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
-                    melted_df["Tanggal"] = melted_df["Tanggal"].dt.strftime('%d-%b-%y')
+                    # Format values for display
+                    display_df = melted_df.copy()
+                    display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+                    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
+                    display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
-                    # Sort by Tanggal, Broker, Field
-                    melted_df = melted_df.sort_values(["Tanggal", "Broker", "Field"])
+                    st.dataframe(display_df[["Tanggal", "Broker", "Field", "Formatted Value"]], use_container_width=True)
 
-                    st.dataframe(melted_df, use_container_width=True)
+                    # 📊 Chart section
+                    st.markdown("---")
+                    st.subheader("📈 Chart by Field")
+
+                    for field in selected_fields:
+                        chart_data = melted_df[melted_df["Field"] == field].dropna()
+                        if not chart_data.empty:
+                            fig = px.line(
+                                chart_data,
+                                x="Tanggal",
+                                y="Value",
+                                color="Broker",
+                                title=f"{field} over Time",
+                                markers=True
+                            )
+                            fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info(f"No data to chart for {field}.")
 
         elif any([selected_brokers, selected_fields]):
             st.info("Please complete all inputs including the date range to show the table.")
