@@ -1,43 +1,64 @@
 import streamlit as st
 import pandas as pd
-import datetime
 
-st.set_page_config(page_title="Financial App", layout="wide")
-st.title("📊 Ringkasan Broker (Start Fresh)")
+st.set_page_config(page_title="Financial Broker Summary", layout="wide")
+st.title("📊 Ringkasan Broker")
 
-# Upload Excel
-uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+# Upload Excel file
+uploaded_file = st.file_uploader("Upload Excel File (Sheet1 expected)", type=["xlsx"])
 
 if uploaded_file:
     try:
-        # Read Excel
         df = pd.read_excel(uploaded_file, sheet_name="Sheet1")
         df.columns = df.columns.str.strip()  # Clean column names
 
-        # Check expected columns
-        expected_cols = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
-        if not expected_cols.issubset(set(df.columns)):
-            st.error("Excel must include these columns: Kode Perusahaan, Nama Perusahaan, Volume, Nilai, Frekuensi")
+        required_cols = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
+        if not required_cols.issubset(set(df.columns)):
+            st.error(f"Excel must include columns: {', '.join(required_cols)}")
+        elif df.empty:
+            st.warning("The sheet is empty.")
         else:
             df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
 
-            # Select broker
-            selected_broker = st.selectbox("Select Broker", df["Broker"])
-            selected_fields = st.multiselect("Select Fields", ["Volume", "Nilai", "Frekuensi"], default=["Volume", "Nilai", "Frekuensi"])
-            selected_date = st.date_input("Select Date", datetime.date.today())
+            # Input section (with no defaults)
+            col1, col2, col3 = st.columns([1, 1, 2])
 
-            if selected_broker and selected_fields:
-                row = df[df["Broker"] == selected_broker].iloc[0]
-                display_df = pd.DataFrame({
-                    "Date": [selected_date.strftime('%d-%b-%y')] * len(selected_fields),
-                    "Field": selected_fields,
-                    "Broker": [selected_broker] * len(selected_fields),
-                    "Value": [row[field] for field in selected_fields]
-                })
+            with col1:
+                selected_broker = st.selectbox("Select Broker", options=[""] + df["Broker"].tolist())
 
-                st.dataframe(display_df, use_container_width=True)
+            with col2:
+                selected_fields = st.multiselect("Select Fields", options=["Volume", "Nilai", "Frekuensi"])
+
+            with col3:
+                st.markdown("**Select Date Range**")
+                date_from = st.date_input("From", value=None, key="from_date")
+                date_to = st.date_input("To", value=None, key="to_date")
+
+            # Display table only when all fields are selected
+            if selected_broker and selected_fields and date_from and date_to:
+                if date_from > date_to:
+                    st.warning("⚠️ 'From' date must be before or equal to 'To' date.")
+                else:
+                    row = df[df["Broker"] == selected_broker].iloc[0]
+                    formatted_date_range = pd.date_range(date_from, date_to, freq="D").strftime('%d-%b-%y')
+
+                    # Prepare display table
+                    result = pd.DataFrame([
+                        {
+                            "Date": date_str,
+                            "Field": field,
+                            "Broker": selected_broker,
+                            "Value": f"{row[field]:,.0f}" if pd.notna(row[field]) else ""
+                        }
+                        for date_str in formatted_date_range
+                        for field in selected_fields
+                    ])
+
+                    st.dataframe(result, use_container_width=True)
+            else:
+                st.info("Please select all required inputs to display the table.")
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"❌ Error reading Excel file: {e}")
 else:
-    st.info("Upload an Excel file with a sheet named 'Sheet1'")
+    st.info("Please upload an Excel file to begin.")
