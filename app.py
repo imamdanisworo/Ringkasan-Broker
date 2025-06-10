@@ -1,28 +1,37 @@
 import streamlit as st
 import pandas as pd
+import re
 from datetime import datetime
 
 st.set_page_config(page_title="Financial Broker Summary", layout="wide")
 st.title("📊 Ringkasan Broker")
 
-# Upload Excel file
 uploaded_file = st.file_uploader("Upload Excel File (Sheet1 expected)", type=["xlsx"])
 
 if uploaded_file:
     try:
+        # Extract filename
+        filename = uploaded_file.name
+        match = re.search(r'(\d{8})', filename)
+        if match:
+            date_str = match.group(1)  # e.g., "20250601"
+            tanggal = datetime.strptime(date_str, "%Y%m%d").date()
+        else:
+            st.error("❌ Filename must contain a date in 'yyyymmdd' format, e.g., 'Ringkasan Broker-20250601.xlsx'")
+            st.stop()
+
+        # Load Excel
         df = pd.read_excel(uploaded_file, sheet_name="Sheet1")
         df.columns = df.columns.str.strip()
 
-        required_cols = {"Tanggal", "Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
+        required_cols = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
         if not required_cols.issubset(set(df.columns)):
             st.error(f"❌ Excel must include columns: {', '.join(required_cols)}")
         elif df.empty:
             st.warning("⚠️ The sheet is empty.")
         else:
-            # Ensure Tanggal column is datetime
-            df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors="coerce")
-            df = df.dropna(subset=["Tanggal"])
-
+            # Inject extracted date
+            df["Tanggal"] = tanggal
             df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
 
             col1, col2, col3 = st.columns([1, 1, 2])
@@ -33,18 +42,17 @@ if uploaded_file:
                 selected_fields = st.multiselect("Select Fields", options=["Volume", "Nilai", "Frekuensi"])
 
             with col3:
-                min_date, max_date = df["Tanggal"].min(), df["Tanggal"].max()
                 st.markdown("**Select Date Range**")
-                date_from = st.date_input("From", min_value=min_date.date(), max_value=max_date.date(), value=min_date.date())
-                date_to = st.date_input("To", min_value=min_date.date(), max_value=max_date.date(), value=max_date.date())
+                date_from = st.date_input("From", value=tanggal)
+                date_to = st.date_input("To", value=tanggal)
 
             if selected_brokers and selected_fields and date_from and date_to:
                 if date_from > date_to:
                     st.warning("⚠️ 'From' date must be before or equal to 'To' date.")
                 else:
                     filtered_df = df[
-                        (df["Tanggal"].dt.date >= date_from) &
-                        (df["Tanggal"].dt.date <= date_to) &
+                        (df["Tanggal"] >= date_from) &
+                        (df["Tanggal"] <= date_to) &
                         (df["Broker"].isin(selected_brokers))
                     ]
 
@@ -56,11 +64,11 @@ if uploaded_file:
                             .sort_values(["Tanggal", "Broker"])
                         )
 
-                        # Format values
+                        # Format numbers
                         for field in selected_fields:
                             display_df[field] = display_df[field].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
 
-                        display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
+                        display_df["Tanggal"] = display_df["Tanggal"].apply(lambda d: d.strftime('%d-%b-%y'))
 
                         st.dataframe(display_df, use_container_width=True)
             elif any([selected_brokers, selected_fields]):
