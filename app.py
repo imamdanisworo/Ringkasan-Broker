@@ -114,11 +114,15 @@ if not combined_df.empty:
         elif display_mode == "Monthly":
             months = sorted(combined_df["Tanggal"].dt.to_period("M").unique())
             selected_months = st.multiselect("Month(s)", months, default=[months[0]])
+            if not selected_months:
+                selected_months = [months[0]]
             date_from = min(m.to_timestamp() for m in selected_months)
             date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
         elif display_mode == "Yearly":
             years = sorted(combined_df["Tanggal"].dt.year.unique())
             selected_years = st.multiselect("Year(s)", years, default=[years[0]])
+            if not selected_years:
+                selected_years = [years[0]]
             date_from = datetime(min(selected_years), 1, 1).date()
             date_to = datetime(max(selected_years), 12, 31).date()
 
