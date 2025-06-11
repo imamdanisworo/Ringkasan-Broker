@@ -101,7 +101,6 @@ if not combined_df.empty:
             else:
                 date_from = date_to = None
 
-    # === Added Warning if Selections Are Incomplete ===
     if not selected_brokers:
         st.warning("❗ Please select at least one broker.")
     elif not selected_fields:
@@ -129,7 +128,6 @@ if not combined_df.empty:
 
             display_df = merged_df.copy()
 
-            # === AGGREGATE & FILTER AFTER GROUPING ===
             if display_mode == "Monthly":
                 display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
                 display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
@@ -148,17 +146,13 @@ if not combined_df.empty:
             display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
             display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
 
-            if display_mode == "Monthly":
-                display_df["Tanggal Display"] = display_df["Tanggal"].dt.strftime('%b %Y')
-            elif display_mode == "Yearly":
-                display_df["Tanggal Display"] = display_df["Tanggal"].dt.strftime('%Y')
-            else:
-                display_df["Tanggal Display"] = display_df["Tanggal"].dt.strftime('%-d %b %Y')
+            # === FIXED: Use real datetime Tanggal for display table ===
+            display_df_for_table = display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
+            display_df_for_table = display_df_for_table.sort_values("Tanggal")
+            st.dataframe(display_df_for_table)
 
-            st.dataframe(display_df[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]].rename(columns={"Tanggal Display": "Tanggal"}))
-
-            # Download button
-            to_download = display_df[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]].rename(columns={"Tanggal Display": "Tanggal"})
+            # === FIXED: Use datetime Tanggal for CSV export too ===
+            to_download = display_df_for_table.copy()
             to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
             csv = to_download.to_csv(index=False).encode("utf-8")
             st.download_button("📥 Download Table as CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
