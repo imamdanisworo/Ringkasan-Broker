@@ -16,14 +16,32 @@ FOLDER_ID = "17gDaKfBzTCLGQkGdsUFZ-CXayGjtYlvD"
 
 uploaded_files = st.file_uploader("⬆️ Upload file Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True)
 temp_data = []
+
 if uploaded_files:
     for file in uploaded_files:
         try:
             df_uploaded = pd.read_excel(file, sheet_name="Sheet1")
             df_uploaded.columns = df_uploaded.columns.str.strip()
-            if "Tanggal" not in df_uploaded.columns:
-                raise KeyError("Kolom 'Tanggal' tidak ditemukan. Periksa kembali struktur file.")
-            df_uploaded["Tanggal"] = pd.to_datetime(df_uploaded["Tanggal"], errors='coerce')
+
+            # Try to extract date from filename
+            match = re.search(r"(\d{8})", file.name)
+            file_date = None
+            if match:
+                try:
+                    file_date = datetime.strptime(match.group(1), "%Y%m%d")
+                except:
+                    pass
+
+            # Handle "Tanggal" column
+            if "Tanggal" in df_uploaded.columns:
+                df_uploaded["Tanggal"] = pd.to_datetime(df_uploaded["Tanggal"], errors='coerce')
+                if df_uploaded["Tanggal"].isna().all() and file_date:
+                    df_uploaded["Tanggal"] = file_date
+            elif file_date:
+                df_uploaded["Tanggal"] = file_date
+            else:
+                raise KeyError("Kolom 'Tanggal' tidak ditemukan dan tidak bisa mendeteksi tanggal dari nama file.")
+
             df_uploaded["Broker"] = df_uploaded["Kode Perusahaan"] + " / " + df_uploaded["Nama Perusahaan"]
             temp_data.append(df_uploaded)
             st.success(f"✅ {file.name} berhasil diunggah.")
@@ -48,17 +66,35 @@ def list_excel_files_in_folder(folder_id):
     return file_dict
 
 @st.cache_data
-def load_excel_from_url(url):
+def load_excel_from_url(url, filename):
     try:
         df = pd.read_excel(url, sheet_name="Sheet1")
         df.columns = df.columns.str.strip()
-        df["Tanggal"] = pd.to_datetime(df["Tanggal"])
+
+        # Try to extract date from filename
+        match = re.search(r"(\d{8})", filename)
+        file_date = None
+        if match:
+            try:
+                file_date = datetime.strptime(match.group(1), "%Y%m%d")
+            except:
+                pass
+
+        # Handle "Tanggal" column
+        if "Tanggal" in df.columns:
+            df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors='coerce')
+            if df["Tanggal"].isna().all() and file_date:
+                df["Tanggal"] = file_date
+        elif file_date:
+            df["Tanggal"] = file_date
+        else:
+            raise KeyError("Kolom 'Tanggal' tidak ditemukan dan tidak bisa mendeteksi tanggal dari nama file.")
+
         df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
         return df
     except Exception as e:
         st.error(f"❌ Gagal memuat file: {e}")
         return pd.DataFrame()
-
 
 excel_links = list_excel_files_in_folder(FOLDER_ID)
 
@@ -67,5 +103,6 @@ if temp_data:
     df = pd.concat(temp_data, ignore_index=True)
 elif excel_links:
     selected_file = st.selectbox("📁 Pilih File dari Google Drive:", list(excel_links.keys()))
-    df = load_excel_from_url(excel_links[selected_file])
-    st.warning("⚠️ Tidak ada data ditemukan. Pastikan folder Google Drive dapat diakses publik dan berisi file .xlsx.")
+    df = load_excel_from_url(excel_links[selected_file], selected_file)
+    if df.empty:
+        st.warning("⚠️ Tidak ada data ditemukan. Pastikan folder Google Drive dapat diakses publik dan berisi file .xlsx.")
