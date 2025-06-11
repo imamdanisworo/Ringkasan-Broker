@@ -105,9 +105,24 @@ if not combined_df.empty:
         selected_fields = st.multiselect("Select Fields", ["Volume", "Nilai", "Frekuensi"])
     with col3:
         min_date, max_date = combined_df["Tanggal"].min().date(), combined_df["Tanggal"].max().date()
-        st.markdown("**Select Date Range**")
-        date_from = st.date_input("From", min_value=min_date, max_value=max_date, value=min_date)
-        date_to = st.date_input("To", min_value=min_date, max_value=max_date, value=max_date)
+        display_mode = st.selectbox("Display Mode", ["Daily", "Monthly", "Yearly"])
+
+        if display_mode == "Daily":
+            st.markdown("**Select Date Range**")
+            date_from = st.date_input("From", min_value=min_date, max_value=max_date, value=min_date)
+            date_to = st.date_input("To", min_value=min_date, max_value=max_date, value=max_date)
+        elif display_mode == "Monthly":
+            st.markdown("**Select Month**")
+            months = sorted(combined_df["Tanggal"].dt.to_period("M").unique())
+            selected_month = st.selectbox("Month", months)
+            date_from = selected_month.to_timestamp()
+            date_to = (selected_month + 1).to_timestamp() - pd.Timedelta(days=1)
+        elif display_mode == "Yearly":
+            st.markdown("**Select Year**")
+            years = sorted(combined_df["Tanggal"].dt.year.unique())
+            selected_year = st.selectbox("Year", years)
+            date_from = datetime(selected_year, 1, 1).date()
+            date_to = datetime(selected_year, 12, 31).date()
 
     if selected_brokers and selected_fields and date_from and date_to:
         if date_from > date_to:
