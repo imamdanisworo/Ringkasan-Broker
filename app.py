@@ -144,14 +144,25 @@ if not combined_df.empty:
                     value_name="Value"
                 )
 
-                display_df = melted_df.copy()
-                display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+                display_df = merged_df.copy()
+
                 if display_mode == "Monthly":
-    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%b-%y')
-elif display_mode == "Yearly":
-    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%Y')
-else:
-    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
+                    display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
+                    display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                elif display_mode == "Yearly":
+                    display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("Y").dt.to_timestamp()
+                    display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+
+                display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+                display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
+
+                if display_mode == "Monthly":
+                    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%b-%y')
+                elif display_mode == "Yearly":
+                    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%Y')
+                else:
+                    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
+
                 display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
                 # Calculate total per day and field for percentage
