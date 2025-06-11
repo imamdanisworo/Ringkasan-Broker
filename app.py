@@ -8,10 +8,10 @@ import io
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 
 st.set_page_config(page_title="Financial Broker Summary", layout="wide")
-st.title("📊 Ringkasan Broker")
+st.title("?? Ringkasan Broker")
 
 # === Refresh Button to Reload Data from HF ===
-if st.button("🔄 Refresh Data from Hugging Face"):
+if st.button("?? Refresh Data from Hugging Face"):
     st.cache_data.clear()
     st.rerun()
 
@@ -174,7 +174,7 @@ if not combined_df.empty:
             st.dataframe(display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]], use_container_width=True)
 
             st.markdown("---")
-            st.subheader("📈 Chart - Original Values")
+            st.subheader("?? Chart - Original Values")
 
             for field in selected_fields:
                 chart_data = merged_df[merged_df["Field"] == field].dropna()
@@ -206,7 +206,7 @@ if not combined_df.empty:
                     st.plotly_chart(fig, use_container_width=True)
 
             st.markdown("---")
-            st.subheader("💸 Chart - Percentage Contribution (%)")
+            st.subheader("?? Chart - Percentage Contribution (%)")
 
             for field in selected_fields:
                 chart_data = merged_df[merged_df["Field"] == field].dropna()
