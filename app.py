@@ -156,6 +156,8 @@ if not combined_df.empty:
                 display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
                 display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
 
+                
+
                 if display_mode == "Monthly":
     display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%b-%y')
 elif display_mode == "Yearly":
@@ -163,7 +165,7 @@ elif display_mode == "Yearly":
 else:
     display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
 
-                display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
+display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
                 # Calculate total per day and field for percentage
                 total_df = combined_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields, var_name="Field", value_name="Value")
