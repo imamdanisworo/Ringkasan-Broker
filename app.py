@@ -158,7 +158,9 @@ if not combined_df.empty:
 
                 
 
-                if display_mode == "Monthly":
+                
+
+if display_mode == "Monthly":
     display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%b-%y')
 elif display_mode == "Yearly":
     display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%Y')
