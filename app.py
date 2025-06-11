@@ -150,17 +150,40 @@ if not combined_df.empty:
             with tab1:
                 for field in selected_fields:
                     chart_data = display_df[display_df["Field"] == field].copy()
-                    fig = px.line(chart_data, x="Tanggal Display", y="Value", color="Broker",
-                                  title=f"{field} over Time", markers=True)
-                    fig.update_layout(yaxis_tickformat=".2s", xaxis_title="Tanggal")
+                    fig = px.line(
+                        chart_data,
+                        x="Tanggal",
+                        y="Value",
+                        color="Broker",
+                        title=f"{field} over Time",
+                        markers=True,
+                        hover_data={"Tanggal": False, "Tanggal Display": True, "Value": ":,.0f"}
+                    )
+                    fig.update_layout(
+                        yaxis_tickformat=".2s",
+                        xaxis_title="Tanggal",
+                        hovermode="x unified"
+                    )
+                    fig.update_traces(hovertemplate='%{customdata[0]}<br>%{y:,.0f}')
                     st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
                 for field in selected_fields:
                     chart_data = display_df[display_df["Field"] == field].copy()
-                    fig = px.line(chart_data, x="Tanggal Display", y="Percentage", color="Broker",
-                                  title=f"{field} Contribution (%) Over Time", markers=True)
-                    fig.update_layout(xaxis_title="Tanggal")
+                    fig = px.line(
+                        chart_data,
+                        x="Tanggal",
+                        y="Percentage",
+                        color="Broker",
+                        title=f"{field} Contribution (%) Over Time",
+                        markers=True,
+                        hover_data={"Tanggal": False, "Tanggal Display": True, "Percentage": ".2f"}
+                    )
+                    fig.update_layout(
+                        xaxis_title="Tanggal",
+                        hovermode="x unified"
+                    )
+                    fig.update_traces(hovertemplate='%{customdata[0]}<br>%{y:.2f}%')
                     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("⬆️ Silakan unggah file Excel terlebih dahulu.")
