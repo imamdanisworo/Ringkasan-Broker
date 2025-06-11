@@ -12,7 +12,7 @@ st.markdown("<h1 style='text-align:center;'>📊 Ringkasan Aktivitas Broker Saha
 st.markdown("### 📂 Pilih File Excel dari Google Drive Folder (otomatis)")
 
 # ========== LINK FOLDER GOOGLE DRIVE ==========
-FOLDER_ID = "17gDaKfBzTCLGQkGdsUFZ-CXayGjtYlvD"
+FOLDER_ID = "17gDaKfBzTCLGQkGdsUFZ-CXayGjtYlvD?usp=sharing"
 
 @st.cache_data
 def list_excel_files_in_folder(folder_id):
