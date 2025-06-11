@@ -82,9 +82,7 @@ def upload_to_hf(file):
         st.error(f"Upload failed: {e}")
 
 # === Optional: Button to re-upload all local .xlsx files ===
-with st.sidebar:
-    if st.button("🔄 Upload All Local .xlsx to Hugging Face"):
-        upload_all_excels()
+
 
 # === Handle File Uploads ===
 uploaded_files = st.file_uploader("Upload Multiple Excel Files (Sheet1 expected)", type=["xlsx"], accept_multiple_files=True)
@@ -173,7 +171,7 @@ if not combined_df.empty:
                 st.markdown("---")
                 st.subheader("📊 Chart - Raw Values")
 
-                for field in selected_fields:
+                for idx, field in enumerate(selected_fields):
                     chart_data = merged_df[merged_df["Field"] == field].dropna()
                     if not chart_data.empty:
                         fig = px.line(
@@ -186,6 +184,7 @@ if not combined_df.empty:
                         )
                         fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
                         st.plotly_chart(fig, use_container_width=True)
+                        st.markdown("​")  # Add invisible line to avoid duplicate element ID
 
                 st.markdown("---")
                 st.subheader("💸 Chart - Percentage Contribution (%)")
