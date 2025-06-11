@@ -138,6 +138,11 @@ total_all_df = total_all_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_i
 total_all_df.rename(columns={"Value": "TotalValue"}, inplace=True)
 merged_df = pd.merge(melted_df, total_all_df, on=["Tanggal", "Field"])
 
+merged_df["Percentage"] = merged_df.apply(
+    lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
+    axis=1
+)
+
             merged_df["Percentage"] = merged_df.apply(
                 lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
                 axis=1
