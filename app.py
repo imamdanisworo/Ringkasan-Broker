@@ -187,7 +187,7 @@ if not combined_df.empty:
                     chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
 
                 if not chart_data.empty:
-                    chart_data["Value"] = chart_data["Value"].round(2)
+                    chart_data["Value"] = (chart_data["Value"] / 1e9).round(2)
                     fig = px.line(
                         chart_data,
                         x="Tanggal",
@@ -197,8 +197,8 @@ if not combined_df.empty:
                         markers=True
                     )
                     fig.update_layout(
-                        yaxis_title=field,
-                        yaxis_tickformat='.2s',
+                        yaxis_title=field + ' (in Billion)',
+                        yaxis_tickformat='.2f',
                         xaxis_title="Tanggal",
                         xaxis_tickformat='%d %b %Y',
                         xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique())
