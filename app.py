@@ -135,10 +135,12 @@ if not combined_df.empty:
             total_df = melted_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
             total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
             merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"])
-            merged_df["Percentage"] = merged_df.apply(
-                lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
-                axis=1
-            )
+
+# Calculate total per field per Tanggal across all brokers (grouped by uploaded file date)
+merged_df["Percentage"] = merged_df.apply(
+    lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
+    axis=1
+)
 
             display_df = merged_df.copy()
 
@@ -167,6 +169,13 @@ if not combined_df.empty:
 
             for field in selected_fields:
                 chart_data = merged_df[merged_df["Field"] == field].dropna()
+
+    if display_mode == "Monthly":
+        chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("M").dt.to_timestamp()
+        chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+    elif display_mode == "Yearly":
+        chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("Y").dt.to_timestamp()
+        chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
 
                 if display_mode == "Monthly":
                     chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("M").dt.to_timestamp()
