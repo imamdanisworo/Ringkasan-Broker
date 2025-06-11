@@ -157,11 +157,6 @@ if not combined_df.empty:
                 display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
 
                 if display_mode == "Monthly":
-                    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%b-%y')
-                elif display_mode == "Yearly":
-                    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%Y')
-                else:
-                    if display_mode == "Monthly":
     display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%b-%y')
 elif display_mode == "Yearly":
     display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%Y')
