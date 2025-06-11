@@ -142,7 +142,11 @@ merged_df["Percentage"] = merged_df.apply(
     axis=1
 )
 
-            display_df = merged_df.copy()
+            if not filtered_df.empty:
+               ...
+               merged_df = pd.merge(...)
+               display_df = merged_df.copy()  # <- should be aligned like this
+
 
             if display_mode == "Monthly":
                 display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
