@@ -1,13 +1,16 @@
 import os
 from huggingface_hub import upload_file
+import streamlit as st  # Required to access secrets in Streamlit Cloud
 
+# Hugging Face config
 REPO_ID = "imamdanisworo/broker-storage"
-HF_TOKEN = os.getenv("HF_TOKEN")  # safer way to use token
+HF_TOKEN = st.secrets["HF_TOKEN"]
 
-def upload_all_csvs():
-    folder_path = "."  # this means same folder as app.py and your CSV files
+# Function to upload all .xlsx files from local folder to HF
+def upload_all_excels():
+    folder_path = "."
     for filename in os.listdir(folder_path):
-        if filename.endswith(".csv"):
+        if filename.endswith(".xlsx"):
             file_path = os.path.join(folder_path, filename)
             print(f"Uploading {filename}...")
 
@@ -20,7 +23,3 @@ def upload_all_csvs():
             )
 
             print(f"✅ Uploaded {filename}")
-
-# This allows it to run from Streamlit button too
-if __name__ == "__main__":
-    upload_all_csvs()
