@@ -10,18 +10,16 @@ from pathlib import Path
 
 st.set_page_config(page_title="📊 Ringkasan Broker", layout="wide")
 
-# === HEADER ===
 st.markdown("<h1 style='text-align:center;'>📊 Ringkasan Aktivitas Broker Saham</h1>", unsafe_allow_html=True)
-st.markdown("### 💾 Unggah & Sinkronisasi Data Excel")
+st.markdown("### 📂 Unggah & Sinkronisasi Data Excel")
 
-# === Refresh Button ===
-st.button("🔄 Refresh dari Hugging Face", on_click=lambda: (st.cache_data.clear(), st.rerun()))
+if st.button("🔄 Refresh dari Hugging Face"):
+    st.cache_data.clear()
+    st.rerun()
 
-# === CONFIG ===
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
-# === Upload all .xlsx from local folder ===
 def upload_all_excels():
     folder_path = "."
     for filename in os.listdir(folder_path):
@@ -39,7 +37,6 @@ def upload_all_excels():
             except Exception as e:
                 st.error(f"❌ Failed to upload {filename}: {e}")
 
-# === Load previously uploaded Excel files from HF ===
 @st.cache_data
 def load_excel_files_from_hf():
     api = HfApi()
@@ -67,7 +64,6 @@ def load_excel_files_from_hf():
 
     return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
 
-# === Upload individual Excel file ===
 def upload_to_hf(file):
     clean_name = re.sub(r"\s*\(\d+\)", "", Path(file.name).stem) + ".xlsx"
     try:
@@ -82,13 +78,11 @@ def upload_to_hf(file):
     except Exception as e:
         st.error(f"❌ Upload gagal: {e}")
 
-# === File Uploads ===
 uploaded_files = st.file_uploader("📁 Unggah Beberapa File Excel (Sheet1 wajib)", type=["xlsx"], accept_multiple_files=True)
 if uploaded_files:
     for file in uploaded_files:
         upload_to_hf(file)
 
-# === Load & Filter Combined Data ===
 combined_df = load_excel_files_from_hf()
 if not combined_df.empty:
     combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
@@ -103,7 +97,7 @@ if not combined_df.empty:
         selected_fields = st.multiselect("📈 Pilih Metode", ["Volume", "Nilai", "Frekuensi"])
     with col3:
         min_date, max_date = combined_df["Tanggal"].min().date(), combined_df["Tanggal"].max().date()
-        display_mode = st.selectbox("📅 Mode Tampilan", ["Daily", "Monthly", "Yearly"])
+        display_mode = st.selectbox("🗓️ Mode Tampilan", ["Daily", "Monthly", "Yearly"])
 
         if display_mode == "Daily":
             date_from = st.date_input("Dari", min_value=min_date, max_value=max_date, value=min_date)
@@ -119,7 +113,6 @@ if not combined_df.empty:
             date_from = datetime(min(selected_years), 1, 1).date()
             date_to = datetime(max(selected_years), 12, 31).date()
 
-    # === Filtered Results Display ===
     if selected_brokers and selected_fields:
         filtered_df = combined_df[
             (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
@@ -164,11 +157,29 @@ if not combined_df.empty:
 
             st.markdown("---")
             st.markdown("### 📊 Grafik Nilai Asli")
+
+            def format_value_short(val):
+                if val >= 1_000_000_000_000:
+                    return f"{val / 1_000_000_000_000:.1f} T"
+                elif val >= 1_000_000_000:
+                    return f"{val / 1_000_000_000:.1f} B"
+                elif val >= 1_000_000:
+                    return f"{val / 1_000_000:.1f} M"
+                elif val >= 1_000:
+                    return f"{val / 1_000:.1f} K"
+                return f"{val:.0f}"
+
             for field in selected_fields:
                 chart_data = merged_df[merged_df["Field"] == field].dropna()
-                if display_mode in ["Monthly", "Yearly"]:
-                    chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("M" if display_mode == "Monthly" else "Y").dt.to_timestamp()
+
+                if display_mode == "Monthly":
+                    chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("M").dt.to_timestamp()
                     chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                elif display_mode == "Yearly":
+                    chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("Y").dt.to_timestamp()
+                    chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+
+                chart_data["ValueShort"] = chart_data["Value"].apply(format_value_short)
 
                 fig = px.line(
                     chart_data,
@@ -177,8 +188,13 @@ if not combined_df.empty:
                     color="Broker",
                     title=f"{field} over Time",
                     markers=True,
-                    hover_data={"Value": ":,.0f", "Broker": True, "Tanggal": True}
+                    hover_data={"ValueShort": True, "Broker": True, "Tanggal": True}
                 )
+
+                fig.update_traces(
+                    hovertemplate="<b>%{x|%d %b %Y}</b><br>Broker: %{customdata[1]}<br>Value: %{customdata[0]}"
+                )
+
                 fig.update_layout(
                     yaxis_title=field,
                     yaxis_tickformat=".2s",
@@ -186,14 +202,20 @@ if not combined_df.empty:
                     xaxis_tickformat='%d %b %Y',
                     xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique())
                 )
+
                 st.plotly_chart(fig, use_container_width=True)
 
             st.markdown("---")
             st.markdown("### 📈 Grafik Kontribusi (%)")
+
             for field in selected_fields:
                 chart_data = merged_df[merged_df["Field"] == field].dropna()
-                if display_mode in ["Monthly", "Yearly"]:
-                    chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("M" if display_mode == "Monthly" else "Y").dt.to_timestamp()
+
+                if display_mode == "Monthly":
+                    chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("M").dt.to_timestamp()
+                    chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                elif display_mode == "Yearly":
+                    chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("Y").dt.to_timestamp()
                     chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
 
                 fig = px.line(
