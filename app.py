@@ -5,7 +5,6 @@ from datetime import datetime
 import plotly.express as px
 import os
 import io
-import hf  # Import helper script to use hf.upload_all_excels()
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 
 st.set_page_config(page_title="Financial Broker Summary", layout="wide")
@@ -14,6 +13,24 @@ st.title("\ud83d\udcca Ringkasan Broker")
 # === CONFIG ===
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
+
+# === Upload all .xlsx from local folder ===
+def upload_all_excels():
+    folder_path = "."
+    for filename in os.listdir(folder_path):
+        if filename.endswith(".xlsx"):
+            file_path = os.path.join(folder_path, filename)
+            try:
+                upload_file(
+                    path_or_fileobj=file_path,
+                    path_in_repo=filename,
+                    repo_id=REPO_ID,
+                    repo_type="dataset",
+                    token=HF_TOKEN
+                )
+                st.success(f"Uploaded: {filename}")
+            except Exception as e:
+                st.error(f"Failed to upload {filename}: {e}")
 
 # === Load previously uploaded Excel files from HF ===
 @st.cache_data
@@ -66,7 +83,7 @@ def upload_to_hf(file):
 # === Optional: Button to re-upload all local .xlsx files ===
 with st.sidebar:
     if st.button("🔄 Upload All Local .xlsx to Hugging Face"):
-        hf.upload_all_excels()
+        upload_all_excels()
 
 # === Handle File Uploads ===
 uploaded_files = st.file_uploader("Upload Multiple Excel Files (Sheet1 expected)", type=["xlsx"], accept_multiple_files=True)
@@ -93,7 +110,7 @@ if not combined_df.empty:
 
     if selected_brokers and selected_fields and date_from and date_to:
         if date_from > date_to:
-            st.warning("\u26a0\ufe0f 'From' date must be before or equal to 'To' date.")
+            st.warning("⚠️ 'From' date must be before or equal to 'To' date.")
         else:
             filtered_df = combined_df[
                 (combined_df["Tanggal"].dt.date >= date_from) &
@@ -119,7 +136,7 @@ if not combined_df.empty:
                 st.dataframe(display_df[["Tanggal", "Broker", "Field", "Formatted Value"]], use_container_width=True)
 
                 st.markdown("---")
-                st.subheader("\ud83d\udcc8 Chart by Field")
+                st.subheader("📈 Chart by Field")
 
                 for field in selected_fields:
                     chart_data = melted_df[melted_df["Field"] == field].dropna()
@@ -153,7 +170,7 @@ if not combined_df.empty:
                 display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
                 st.markdown("---")
-                st.subheader("\ud83d\udcc8 Chart - Raw Values")
+                st.subheader("📊 Chart - Raw Values")
 
                 for field in selected_fields:
                     chart_data = merged_df[merged_df["Field"] == field].dropna()
@@ -170,7 +187,7 @@ if not combined_df.empty:
                         st.plotly_chart(fig, use_container_width=True)
 
                 st.markdown("---")
-                st.subheader("\ud83d\udcb8 Chart - Percentage Contribution (%)")
+                st.subheader("💸 Chart - Percentage Contribution (%)")
 
                 for field in selected_fields:
                     chart_data = merged_df[merged_df["Field"] == field].dropna()
