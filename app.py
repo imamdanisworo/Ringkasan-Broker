@@ -105,8 +105,6 @@ if not combined_df.empty:
         elif display_mode == "Monthly":
             months = sorted(combined_df["Tanggal"].dt.to_period("M").unique())
             selected_months = st.multiselect("🗓️ Bulan", months, default=[months[0]])
-            if not selected_months:
-                selected_months = [months[0]]
             date_from = min(m.to_timestamp() for m in selected_months)
             date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
         elif display_mode == "Yearly":
@@ -199,7 +197,7 @@ if not combined_df.empty:
 
                 fig.update_layout(
                     yaxis_title=field,
-                    yaxis_tickformat="~s",
+                    yaxis_tickformat=".2s",
                     xaxis_title="Tanggal",
                     xaxis_tickformat='%d %b %Y',
                     xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique())
@@ -208,7 +206,8 @@ if not combined_df.empty:
                 st.plotly_chart(fig, use_container_width=True)
 
             st.markdown("---")
-            st.markdown("### 📈 Grafik Kontribusi (%)")
+            st.markdown("### 📈 Grafik Kontribusi (%)
+#### ℹ️ Menunjukkan kontribusi broker terhadap total nilai yang diperdagangkan di BEI pada hari tersebut.")
 
             for field in selected_fields:
                 chart_data = merged_df[merged_df["Field"] == field].dropna()
