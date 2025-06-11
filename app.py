@@ -208,11 +208,11 @@ if not combined_df.empty:
                         color="Broker",
                         title=f"{field} over Time",
                         markers=True,
-                        hover_data={"DisplayValue": True, "Unit": False, "Value": True}
+                        hover_data={"Broker": True, "Tanggal": True, "DisplayValue": True, "Unit": True, "Value": True}
                     )
                     fig.update_layout(
                         yaxis_title=field + ' (auto-scaled)',
-                        yaxis_tickformat='.2f',
+                        yaxis_tickformat='.2s',
                         xaxis_title="Tanggal",
                         xaxis_tickformat='%d %b %Y',
                         xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique())
