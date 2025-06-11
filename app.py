@@ -44,9 +44,10 @@ def load_excel_files_from_hf():
         try:
             file_path = hf_hub_download(repo_id=REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
             match = re.search(r'(\d{8})', file)
-            if not match:
-                continue
-            file_date = datetime.strptime(match.group(1), "%Y%m%d").date()
+            if match:
+                file_date = datetime.strptime(match.group(1), "%Y%m%d").date()
+            else:
+                file_date = datetime.today().date()
 
             df = pd.read_excel(file_path, sheet_name="Sheet1")
             df.columns = df.columns.str.strip()
