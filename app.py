@@ -13,7 +13,7 @@ st.title("📊 Ringkasan Broker")
 # === Refresh Button to Reload Data from HF ===
 if st.button("🔄 Refresh Data from Hugging Face"):
     st.cache_data.clear()
-    st.experimental_rerun()
+    st.rerun()
 
 # === CONFIG ===
 REPO_ID = "imamdanisworo/broker-storage"
