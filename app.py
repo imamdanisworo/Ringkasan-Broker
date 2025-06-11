@@ -82,9 +82,9 @@ if not combined_df.empty:
         elif display_mode == "Monthly":
             all_months = combined_df["Tanggal"].dt.to_period("M")
             unique_years = sorted(set(m.year for m in all_months.unique()))
-            selected_year = st.selectbox("Year", unique_years)
-            months = sorted([m for m in all_months.unique() if m.year == selected_year])
-            selected_months = st.multiselect("Month(s)", months, default=[])
+            selected_years = st.multiselect("Year(s)", unique_years, default=[today.year])
+            months = sorted([m for m in all_months.unique() if m.year in selected_years])
+            selected_months = st.multiselect("Month(s)", months, default=months)
             if selected_months:
                 date_from = min(m.to_timestamp() for m in selected_months)
                 date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
@@ -92,7 +92,7 @@ if not combined_df.empty:
                 date_from = date_to = None
         elif display_mode == "Yearly":
             years = sorted(combined_df["Tanggal"].dt.year.unique())
-            selected_years = st.multiselect("Year(s)", years, default=[])
+            selected_years = st.multiselect("Year(s)", years, default=[today.year])
             if selected_years:
                 date_from = datetime(min(selected_years), 1, 1).date()
                 date_to = datetime(max(selected_years), 12, 31).date()
