@@ -166,15 +166,13 @@ if not combined_df.empty:
                         y="Value",
                         color="Broker",
                         title=f"{field} over Time",
-                        markers=True,
-                        hover_data={"Tanggal": False, "Tanggal Display": True, "Value": ":,.0f"}
+                        markers=True
                     )
                     fig.update_layout(
                         yaxis_tickformat=".2s",
                         xaxis_title="Tanggal",
                         hovermode="x unified"
                     )
-                    fig.update_traces(hovertemplate='%{customdata[0]}<br>%{y:,.0f}')
                     st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
@@ -186,14 +184,12 @@ if not combined_df.empty:
                         y="Percentage",
                         color="Broker",
                         title=f"{field} Contribution (%) Over Time",
-                        markers=True,
-                        hover_data={"Tanggal": False, "Tanggal Display": True, "Percentage": ".2f"}
+                        markers=True
                     )
                     fig.update_layout(
                         xaxis_title="Tanggal",
                         hovermode="x unified"
                     )
-                    fig.update_traces(hovertemplate='%{customdata[0]}<br>%{y:.2f}%')
                     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("⬆️ Silakan unggah file Excel terlebih dahulu.")
