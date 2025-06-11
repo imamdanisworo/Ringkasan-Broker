@@ -211,7 +211,7 @@ if not combined_df.empty:
                         hover_data={"Broker": True, "Tanggal": True, "DisplayValue": True, "Unit": True, "Value": True}
                     )
                     fig.update_layout(
-                        yaxis_title=field + ' (auto-scaled)',
+                        yaxis_title=field + ' (K/M/B/T)',
                         yaxis_tickformat='.2s',
                         xaxis_title="Tanggal",
                         xaxis_tickformat='%d %b %Y',
