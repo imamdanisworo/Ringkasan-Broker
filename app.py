@@ -128,6 +128,7 @@ if not combined_df.empty:
 
             display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
             display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
+            display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%-d %b %Y')
 
             st.dataframe(display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]])
 
@@ -142,7 +143,8 @@ if not combined_df.empty:
 
             with tab1:
                 for field in selected_fields:
-                    chart_data = display_df[display_df["Field"] == field]
+                    chart_data = display_df[display_df["Field"] == field].copy()
+                    chart_data["Tanggal"] = pd.to_datetime(chart_data["Tanggal"], format='%d %b %Y')
                     fig = px.line(chart_data, x="Tanggal", y="Value", color="Broker",
                                   title=f"{field} over Time", markers=True)
                     fig.update_layout(yaxis_tickformat=".2s")
@@ -150,7 +152,8 @@ if not combined_df.empty:
 
             with tab2:
                 for field in selected_fields:
-                    chart_data = display_df[display_df["Field"] == field]
+                    chart_data = display_df[display_df["Field"] == field].copy()
+                    chart_data["Tanggal"] = pd.to_datetime(chart_data["Tanggal"], format='%d %b %Y')
                     fig = px.line(chart_data, x="Tanggal", y="Percentage", color="Broker",
                                   title=f"{field} Contribution (%) Over Time", markers=True)
                     st.plotly_chart(fig, use_container_width=True)
