@@ -198,8 +198,9 @@ if not combined_df.empty:
                 fig.update_layout(
                     yaxis=dict(
                         title=field,
-                        tickvals=chart_data['Value'].unique(),
-                        ticktext=[format_value_short(val) for val in chart_data['Value'].unique()]
+                        tickmode='array',
+                        tickvals=[v for v in sorted(chart_data['Value'].unique())],
+                        ticktext=[format_value_short(v) for v in sorted(chart_data['Value'].unique())]
                     ),
                     xaxis_title="Tanggal",
                     xaxis_tickformat='%d %b %Y',
