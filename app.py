@@ -105,6 +105,8 @@ if not combined_df.empty:
         elif display_mode == "Monthly":
             months = sorted(combined_df["Tanggal"].dt.to_period("M").unique())
             selected_months = st.multiselect("🗓️ Bulan", months, default=[months[0]])
+            if not selected_months:
+                selected_months = [months[0]]
             date_from = min(m.to_timestamp() for m in selected_months)
             date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
         elif display_mode == "Yearly":
