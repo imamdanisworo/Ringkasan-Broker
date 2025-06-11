@@ -112,15 +112,15 @@ if not combined_df.empty:
             date_from = st.date_input("From", min_value=min_date, max_value=max_date, value=min_date)
             date_to = st.date_input("To", min_value=min_date, max_value=max_date, value=max_date)
         elif display_mode == "Monthly":
-    months = sorted(combined_df["Tanggal"].dt.to_period("M").unique())
-    selected_months = st.multiselect("Month(s)", months, default=[months[0]])
-    date_from = min(m.to_timestamp() for m in selected_months)
-    date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
+            months = sorted(combined_df["Tanggal"].dt.to_period("M").unique())
+            selected_months = st.multiselect("Month(s)", months, default=[months[0]])
+            date_from = min(m.to_timestamp() for m in selected_months)
+            date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
         elif display_mode == "Yearly":
-    years = sorted(combined_df["Tanggal"].dt.year.unique())
-    selected_years = st.multiselect("Year(s)", years, default=[years[0]])
-    date_from = datetime(min(selected_years), 1, 1).date()
-    date_to = datetime(max(selected_years), 12, 31).date()
+            years = sorted(combined_df["Tanggal"].dt.year.unique())
+            selected_years = st.multiselect("Year(s)", years, default=[years[0]])
+            date_from = datetime(min(selected_years), 1, 1).date()
+            date_to = datetime(max(selected_years), 12, 31).date()
 
     if selected_brokers and selected_fields and date_from and date_to:
         filtered_df = combined_df[
