@@ -69,15 +69,17 @@ def load_excel_files_from_hf():
 
 # === Upload newly uploaded Excel files to HF ===
 def upload_to_hf(file):
+    from pathlib import Path
+    clean_name = re.sub(r"\s*\(\d+\)", "", Path(file.name).stem) + ".xlsx"
     try:
         upload_file(
             path_or_fileobj=file,
-            path_in_repo=file.name,
+            path_in_repo=clean_name,
             repo_id=REPO_ID,
             repo_type="dataset",
             token=HF_TOKEN
         )
-        st.success(f"Uploaded {file.name} to Hugging Face")
+        st.success(f"Uploaded {clean_name} to Hugging Face (overwriting if existed)")
     except Exception as e:
         st.error(f"Upload failed: {e}")
 
