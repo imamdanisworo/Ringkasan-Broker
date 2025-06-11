@@ -187,32 +187,18 @@ if not combined_df.empty:
                     chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
 
                 if not chart_data.empty:
-                    # Adaptive unit conversion for display and tooltip
-                    def convert_value(val):
-                        if val >= 1e12:
-                            return round(val / 1e12, 2), 'T'
-                        elif val >= 1e9:
-                            return round(val / 1e9, 2), 'B'
-                        elif val >= 1e6:
-                            return round(val / 1e6, 2), 'M'
-                        elif val >= 1e3:
-                            return round(val / 1e3, 2), 'K'
-                        else:
-                            return val, ''
-
-                    chart_data[["DisplayValue", "Unit"]] = chart_data["Value"].apply(lambda x: pd.Series(convert_value(x)))
                     fig = px.line(
                         chart_data,
                         x="Tanggal",
-                        y="DisplayValue",
+                        y="Value",
                         color="Broker",
                         title=f"{field} over Time",
                         markers=True,
-                        hover_data={"Broker": True, "Tanggal": True, "DisplayValue": True, "Unit": True, "Value": True}
+                        hover_data={"Value": ":,.0f", "Broker": True, "Tanggal": True}
                     )
                     fig.update_layout(
-                        yaxis_title=field + ' (' + chart_data['Unit'].iloc[0] + ')',
-                        yaxis_tickformat='.2s',
+                        yaxis_title=field,
+                        yaxis_tickformat=".2s",
                         xaxis_title="Tanggal",
                         xaxis_tickformat='%d %b %Y',
                         xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique())
