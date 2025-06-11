@@ -126,7 +126,7 @@ if not combined_df.empty:
             date_from = datetime(min(selected_years), 1, 1).date()
             date_to = datetime(max(selected_years), 12, 31).date()
 
-    if selected_brokers and selected_fields and date_from and date_to:
+    if selected_brokers and selected_fields and date_from and date_to and not (display_mode == "Monthly" and not selected_months) and not (display_mode == "Yearly" and not selected_years):
         filtered_df = combined_df[
             (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
             (combined_df["Tanggal"] <= pd.to_datetime(date_to)) &
