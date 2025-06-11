@@ -146,13 +146,16 @@ if not combined_df.empty:
             display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
             display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
 
-            # === FIXED: Use real datetime Tanggal for display table ===
+            # === REFORMATTED DATE FOR DISPLAY BUT KEEP DATETIME FOR SORTING ===
             display_df_for_table = display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
+            display_df_for_table["Tanggal Display"] = display_df["Tanggal"].dt.strftime(
+                '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
+            )
             display_df_for_table = display_df_for_table.sort_values("Tanggal")
-            st.dataframe(display_df_for_table)
+            st.dataframe(display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]].rename(columns={"Tanggal Display": "Tanggal"}))
 
-            # === FIXED: Use datetime Tanggal for CSV export too ===
-            to_download = display_df_for_table.copy()
+            # CSV Export using raw Tanggal (datetime)
+            to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
             to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
             csv = to_download.to_csv(index=False).encode("utf-8")
             st.download_button("📥 Download Table as CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
