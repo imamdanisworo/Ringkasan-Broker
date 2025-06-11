@@ -132,16 +132,15 @@ if not combined_df.empty:
                 value_name="Value"
             )
 
-            # Calculate total value per day across all brokers per original Excel upload (not just filtered ones)
-total_all_df = combined_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields, var_name="Field", value_name="Value")
-total_all_df = total_all_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
-total_all_df.rename(columns={"Value": "TotalValue"}, inplace=True)
-merged_df = pd.merge(melted_df, total_all_df, on=["Tanggal", "Field"])
+            total_all_df = combined_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields, var_name="Field", value_name="Value")
+            total_all_df = total_all_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
+            total_all_df.rename(columns={"Value": "TotalValue"}, inplace=True)
+            merged_df = pd.merge(melted_df, total_all_df, on=["Tanggal", "Field"])
 
-merged_df["Percentage"] = merged_df.apply(
-    lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
-    axis=1
-)
+            merged_df["Percentage"] = merged_df.apply(
+                lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
+                axis=1
+            )
 
             display_df = merged_df.copy()
 
