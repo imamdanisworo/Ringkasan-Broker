@@ -119,12 +119,22 @@ if not combined_df.empty:
                 lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0, axis=1)
 
             display_df = merged_df.copy()
+
+            # === AGGREGATE & FILTER AFTER GROUPING ===
             if display_mode == "Monthly":
                 display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
                 display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                display_df = display_df[
+                    (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
+                    (display_df["Tanggal"] <= pd.to_datetime(date_to))
+                ]
             elif display_mode == "Yearly":
                 display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("Y").dt.to_timestamp()
                 display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                display_df = display_df[
+                    (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
+                    (display_df["Tanggal"] <= pd.to_datetime(date_to))
+                ]
 
             display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
             display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
