@@ -166,7 +166,12 @@ if not combined_df.empty:
                             title=f"{field} over Time",
                             markers=True
                         )
-                        fig.update_layout(yaxis_title=field, xaxis_title="Tanggal", xaxis_tickformat='%d %b %Y', xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique()))),)
+                        fig.update_layout(
+                            yaxis_title=field,
+                            xaxis_title="Tanggal",
+                            xaxis_tickformat='%d %b %Y',
+                            xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique())
+                        )
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info(f"No data to chart for {field}.")
