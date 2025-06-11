@@ -55,6 +55,8 @@ def load_excel_files():
                 df["Tanggal"] = file_date
                 df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
                 data.append(df)
+            else:
+                st.warning(f"⚠️ {file} skipped: missing required columns.")
         except Exception as e:
             st.warning(f"⚠️ Failed to load {file}: {e}")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
@@ -99,7 +101,14 @@ if not combined_df.empty:
             else:
                 date_from = date_to = None
 
-    if selected_brokers and selected_fields and date_from and date_to:
+    # === Added Warning if Selections Are Incomplete ===
+    if not selected_brokers:
+        st.warning("❗ Please select at least one broker.")
+    elif not selected_fields:
+        st.warning("❗ Please select at least one data field.")
+    elif not date_from or not date_to:
+        st.warning("❗ Please specify a valid date range.")
+    elif selected_brokers and selected_fields and date_from and date_to:
         filtered_df = combined_df[
             (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
             (combined_df["Tanggal"] <= pd.to_datetime(date_to)) &
