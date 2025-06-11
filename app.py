@@ -5,10 +5,11 @@ from datetime import datetime
 import plotly.express as px
 import os
 import io
+import hf  # Import helper script to use hf.upload_all_excels()
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 
 st.set_page_config(page_title="Financial Broker Summary", layout="wide")
-st.title("📊 Ringkasan Broker")
+st.title("\ud83d\udcca Ringkasan Broker")
 
 # === CONFIG ===
 REPO_ID = "imamdanisworo/broker-storage"
@@ -62,6 +63,11 @@ def upload_to_hf(file):
     except Exception as e:
         st.error(f"Upload failed: {e}")
 
+# === Optional: Button to re-upload all local .xlsx files ===
+with st.sidebar:
+    if st.button("🔄 Upload All Local .xlsx to Hugging Face"):
+        hf.upload_all_excels()
+
 # === Handle File Uploads ===
 uploaded_files = st.file_uploader("Upload Multiple Excel Files (Sheet1 expected)", type=["xlsx"], accept_multiple_files=True)
 
@@ -87,7 +93,7 @@ if not combined_df.empty:
 
     if selected_brokers and selected_fields and date_from and date_to:
         if date_from > date_to:
-            st.warning("⚠️ 'From' date must be before or equal to 'To' date.")
+            st.warning("\u26a0\ufe0f 'From' date must be before or equal to 'To' date.")
         else:
             filtered_df = combined_df[
                 (combined_df["Tanggal"].dt.date >= date_from) &
@@ -113,7 +119,7 @@ if not combined_df.empty:
                 st.dataframe(display_df[["Tanggal", "Broker", "Field", "Formatted Value"]], use_container_width=True)
 
                 st.markdown("---")
-                st.subheader("📈 Chart by Field")
+                st.subheader("\ud83d\udcc8 Chart by Field")
 
                 for field in selected_fields:
                     chart_data = melted_df[melted_df["Field"] == field].dropna()
@@ -147,7 +153,7 @@ if not combined_df.empty:
                 display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
                 st.markdown("---")
-                st.subheader("📊 Chart - Raw Values")
+                st.subheader("\ud83d\udcc8 Chart - Raw Values")
 
                 for field in selected_fields:
                     chart_data = merged_df[merged_df["Field"] == field].dropna()
@@ -164,7 +170,7 @@ if not combined_df.empty:
                         st.plotly_chart(fig, use_container_width=True)
 
                 st.markdown("---")
-                st.subheader("💸 Chart - Percentage Contribution (%)")
+                st.subheader("\ud83d\udcb8 Chart - Percentage Contribution (%)")
 
                 for field in selected_fields:
                     chart_data = merged_df[merged_df["Field"] == field].dropna()
