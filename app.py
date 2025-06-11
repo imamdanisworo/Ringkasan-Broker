@@ -134,6 +134,21 @@ if not combined_df.empty:
                 display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
                 display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
+                # Calculate total per day and field for percentage
+                total_df = melted_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
+                total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
+                merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"])
+                merged_df["Percentage"] = merged_df.apply(
+                    lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
+                    axis=1
+                )
+
+                display_df = merged_df.copy()
+                display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+                display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
+                display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
+                display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
+
                 st.dataframe(display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]], use_container_width=True)
 
                 st.markdown("---")
