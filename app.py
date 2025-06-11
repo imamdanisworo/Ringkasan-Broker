@@ -21,7 +21,9 @@ if uploaded_files:
         try:
             df_uploaded = pd.read_excel(file, sheet_name="Sheet1")
             df_uploaded.columns = df_uploaded.columns.str.strip()
-            df_uploaded["Tanggal"] = pd.to_datetime(df_uploaded["Tanggal"])
+            if "Tanggal" not in df_uploaded.columns:
+                raise KeyError("Kolom 'Tanggal' tidak ditemukan. Periksa kembali struktur file.")
+            df_uploaded["Tanggal"] = pd.to_datetime(df_uploaded["Tanggal"], errors='coerce')
             df_uploaded["Broker"] = df_uploaded["Kode Perusahaan"] + " / " + df_uploaded["Nama Perusahaan"]
             temp_data.append(df_uploaded)
             st.success(f"✅ {file.name} berhasil diunggah.")
