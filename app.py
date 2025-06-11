@@ -134,10 +134,10 @@ if not combined_df.empty:
                 display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
                 display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
-                st.dataframe(display_df[["Tanggal", "Broker", "Field", "Formatted Value"]], use_container_width=True)
+                st.dataframe(display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]], use_container_width=True)
 
                 st.markdown("---")
-                st.subheader("📈 Chart by Field")
+                st.subheader("📈 Chart - Original Values")
 
                 for field in selected_fields:
                     chart_data = melted_df[melted_df["Field"] == field].dropna()
@@ -151,11 +151,12 @@ if not combined_df.empty:
                             markers=True
                         )
                         fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
-                        # st.plotly_chart removed due to error-prone chart rendering
+                        st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info(f"No data to chart for {field}.")
 
-                # Percentage Chart
+                st.markdown("---")
+                st.subheader("💸 Chart - Percentage Contribution (%)")
                 total_df = melted_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
                 total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
                 merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"])
