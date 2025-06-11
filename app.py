@@ -146,7 +146,12 @@ if not combined_df.empty:
 
                 display_df = melted_df.copy()
                 display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
-                display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
+                if display_mode == "Monthly":
+    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%b-%y')
+elif display_mode == "Yearly":
+    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%Y')
+else:
+    display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
                 display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
                 # Calculate total per day and field for percentage
@@ -180,7 +185,14 @@ if not combined_df.empty:
                 st.subheader("📈 Chart - Original Values")
 
                 for field in selected_fields:
-                    chart_data = melted_df[melted_df["Field"] == field].dropna()
+                    chart_data = merged_df[merged_df["Field"] == field].dropna()
+
+                    if display_mode == "Monthly":
+                        chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("M").dt.to_timestamp()
+                        chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                    elif display_mode == "Yearly":
+                        chart_data["Tanggal"] = chart_data["Tanggal"].dt.to_period("Y").dt.to_timestamp()
+                        chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
                     if not chart_data.empty:
                         fig = px.line(
                             chart_data,
