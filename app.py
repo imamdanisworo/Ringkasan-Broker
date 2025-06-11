@@ -211,7 +211,7 @@ if not combined_df.empty:
                         hover_data={"Broker": True, "Tanggal": True, "DisplayValue": True, "Unit": True, "Value": True}
                     )
                     fig.update_layout(
-                        yaxis_title=field + ' (K/M/B/T)',
+                        yaxis_title=field + ' (' + chart_data['Unit'].iloc[0] + ')',
                         yaxis_tickformat='.2s',
                         xaxis_title="Tanggal",
                         xaxis_tickformat='%d %b %Y',
