@@ -152,6 +152,7 @@ if not combined_df.empty:
                         )
                         fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
                         st.plotly_chart(fig, use_container_width=True)
+                    st.markdown("​")  # Prevent duplicate element ID
                     else:
                         st.info(f"No data to chart for {field}.")
 
@@ -191,7 +192,7 @@ if not combined_df.empty:
                 st.markdown("---")
                 st.subheader("💸 Chart - Percentage Contribution (%)")
 
-                for field in selected_fields:
+                for idx, field in enumerate(selected_fields):
                     chart_data = merged_df[merged_df["Field"] == field].dropna()
                     if not chart_data.empty:
                         fig = px.line(
