@@ -129,8 +129,8 @@ if not combined_df.empty:
             st.warning("⚠️ 'From' date must be before or equal to 'To' date.")
         else:
             filtered_df = combined_df[
-                (combined_df["Tanggal"].dt.date >= date_from) &
-                (combined_df["Tanggal"].dt.date <= date_to) &
+                (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
+                (combined_df["Tanggal"] <= pd.to_datetime(date_to)) &
                 (combined_df["Broker"].isin(selected_brokers))
             ]
 
@@ -160,6 +160,15 @@ if not combined_df.empty:
                 )
 
                 display_df = merged_df.copy()
+
+                if display_mode == "Monthly":
+                    display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
+                    display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+
+                elif display_mode == "Yearly":
+                    display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("Y").dt.to_timestamp()
+                    display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+
                 display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
                 display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
                 display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
