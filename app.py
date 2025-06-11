@@ -14,6 +14,20 @@ st.markdown("### 📂 Unggah File & Sinkronisasi ke Google Drive")
 # ========== LINK FOLDER GOOGLE DRIVE ==========
 FOLDER_ID = "17gDaKfBzTCLGQkGdsUFZ-CXayGjtYlvD"
 
+uploaded_files = st.file_uploader("⬆️ Upload file Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+temp_data = []
+if uploaded_files:
+    for file in uploaded_files:
+        try:
+            df_uploaded = pd.read_excel(file, sheet_name="Sheet1")
+            df_uploaded.columns = df_uploaded.columns.str.strip()
+            df_uploaded["Tanggal"] = pd.to_datetime(df_uploaded["Tanggal"])
+            df_uploaded["Broker"] = df_uploaded["Kode Perusahaan"] + " / " + df_uploaded["Nama Perusahaan"]
+            temp_data.append(df_uploaded)
+            st.success(f"✅ {file.name} berhasil diunggah.")
+        except Exception as e:
+            st.error(f"❌ Gagal membaca {file.name}: {e}")
+
 @st.cache_data
 def list_excel_files_in_folder(folder_id):
     url = f"https://drive.google.com/embeddedfolderview?id={folder_id}#list"
@@ -46,8 +60,10 @@ def load_excel_from_url(url):
 
 excel_links = list_excel_files_in_folder(FOLDER_ID)
 
-if excel_links:
+df = pd.DataFrame()
+if temp_data:
+    df = pd.concat(temp_data, ignore_index=True)
+elif excel_links:
     selected_file = st.selectbox("📁 Pilih File dari Google Drive:", list(excel_links.keys()))
     df = load_excel_from_url(excel_links[selected_file])
-else:
     st.warning("⚠️ Tidak ada data ditemukan. Pastikan folder Google Drive dapat diakses publik dan berisi file .xlsx.")
