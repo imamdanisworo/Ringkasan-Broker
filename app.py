@@ -152,7 +152,6 @@ if not combined_df.empty:
                         )
                         fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
                         st.plotly_chart(fig, use_container_width=True)
-                    st.markdown("​")  # Prevent duplicate element ID
                     else:
                         st.info(f"No data to chart for {field}.")
 
