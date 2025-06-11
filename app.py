@@ -10,6 +10,11 @@ from huggingface_hub import HfApi, hf_hub_download, upload_file
 st.set_page_config(page_title="Financial Broker Summary", layout="wide")
 st.title("📊 Ringkasan Broker")
 
+# === Refresh Button to Reload Data from HF ===
+if st.button("🔄 Refresh Data from Hugging Face"):
+    st.cache_data.clear()
+    st.experimental_rerun()
+
 # === CONFIG ===
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
