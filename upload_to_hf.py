@@ -1,12 +1,11 @@
+# hf.py
 import os
 from huggingface_hub import upload_file
-import streamlit as st  # Required to access secrets in Streamlit Cloud
+import streamlit as st
 
-# Hugging Face config
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
-# Function to upload all .xlsx files from local folder to HF
 def upload_all_excels():
     folder_path = "."
     for filename in os.listdir(folder_path):
