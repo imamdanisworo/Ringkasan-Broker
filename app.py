@@ -2,76 +2,50 @@ import streamlit as st
 import pandas as pd
 import re
 from datetime import datetime
-import plotly.express as px
-import requests
-from bs4 import BeautifulSoup
+from huggingface_hub import HfApi, hf_hub_download, upload_file, list_repo_files
+import os
+import io
 
 st.set_page_config(page_title="📊 Ringkasan Broker", layout="wide")
 
 st.markdown("<h1 style='text-align:center;'>📊 Ringkasan Aktivitas Broker Saham</h1>", unsafe_allow_html=True)
-st.markdown("### 📂 Unggah File & Sinkronisasi ke Google Drive")
+st.markdown("### 📂 Unggah File Excel (.xlsx) & Simpan ke Hugging Face Dataset")
 
-# ========== LINK FOLDER GOOGLE DRIVE ==========
-FOLDER_ID = "17gDaKfBzTCLGQkGdsUFZ-CXayGjtYlvD"
+# === CONFIG HF ===
+REPO_ID = "imamdanisworo/broker-storage"
+HF_TOKEN = st.secrets["HF_TOKEN"]
 
+# === UPLOAD SECTION ===
 uploaded_files = st.file_uploader("⬆️ Upload file Excel (.xlsx)", type=["xlsx"], accept_multiple_files=True)
-temp_data = []
-
 if uploaded_files:
     for file in uploaded_files:
         try:
-            df_uploaded = pd.read_excel(file, sheet_name="Sheet1")
-            df_uploaded.columns = df_uploaded.columns.str.strip()
-
-            # Try to extract date from filename
-            match = re.search(r"(\d{8})", file.name)
-            file_date = None
-            if match:
-                try:
-                    file_date = datetime.strptime(match.group(1), "%Y%m%d")
-                except:
-                    pass
-
-            # Handle "Tanggal" column
-            if "Tanggal" in df_uploaded.columns:
-                df_uploaded["Tanggal"] = pd.to_datetime(df_uploaded["Tanggal"], errors='coerce')
-                if df_uploaded["Tanggal"].isna().all() and file_date:
-                    df_uploaded["Tanggal"] = file_date
-            elif file_date:
-                df_uploaded["Tanggal"] = file_date
-            else:
-                raise KeyError("Kolom 'Tanggal' tidak ditemukan dan tidak bisa mendeteksi tanggal dari nama file.")
-
-            df_uploaded["Broker"] = df_uploaded["Kode Perusahaan"] + " / " + df_uploaded["Nama Perusahaan"]
-            temp_data.append(df_uploaded)
-            st.success(f"✅ {file.name} berhasil diunggah.")
+            # Save to Hugging Face
+            upload_file(
+                path_or_fileobj=file,
+                path_in_repo=file.name,
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN
+            )
+            st.success(f"✅ {file.name} berhasil diunggah ke Hugging Face")
         except Exception as e:
-            st.error(f"❌ Gagal membaca {file.name}: {e}")
+            st.error(f"❌ Gagal upload {file.name}: {e}")
+
+# === LOAD FROM HF ===
+@st.cache_data
+def list_excel_files_from_repo():
+    files = list_repo_files(repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN)
+    return [f for f in files if f.endswith(".xlsx")]
 
 @st.cache_data
-def list_excel_files_in_folder(folder_id):
-    url = f"https://drive.google.com/embeddedfolderview?id={folder_id}#list"
-    res = requests.get(url)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    links = soup.find_all('a')
-    file_dict = {}
-    for link in links:
-        href = link.get('href')
-        if href and href.startswith("https://drive.google.com/file/d/") and href.endswith("/view"):
-            file_id = href.split("/d/")[1].split("/")[0]
-            file_name = link.text.strip()
-            if file_name.endswith(".xlsx"):
-                direct_url = f"https://drive.google.com/uc?id={file_id}&export=download"
-                file_dict[file_name] = direct_url
-    return file_dict
-
-@st.cache_data
-def load_excel_from_url(url, filename):
+def load_excel_from_repo(filename):
     try:
-        df = pd.read_excel(url, sheet_name="Sheet1")
+        file_path = hf_hub_download(repo_id=REPO_ID, repo_type="dataset", filename=filename, token=HF_TOKEN)
+        df = pd.read_excel(file_path, sheet_name="Sheet1")
         df.columns = df.columns.str.strip()
 
-        # Try to extract date from filename
+        # Extract date from filename
         match = re.search(r"(\d{8})", filename)
         file_date = None
         if match:
@@ -80,7 +54,7 @@ def load_excel_from_url(url, filename):
             except:
                 pass
 
-        # Handle "Tanggal" column
+        # Handle Tanggal
         if "Tanggal" in df.columns:
             df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors='coerce')
             if df["Tanggal"].isna().all() and file_date:
@@ -88,21 +62,23 @@ def load_excel_from_url(url, filename):
         elif file_date:
             df["Tanggal"] = file_date
         else:
-            raise KeyError("Kolom 'Tanggal' tidak ditemukan dan tidak bisa mendeteksi tanggal dari nama file.")
+            raise KeyError("Kolom 'Tanggal' tidak ditemukan dan tidak bisa deteksi dari nama file.")
 
         df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
         return df
     except Exception as e:
-        st.error(f"❌ Gagal memuat file: {e}")
+        st.error(f"Gagal load file {filename}: {e}")
         return pd.DataFrame()
 
-excel_links = list_excel_files_in_folder(FOLDER_ID)
+# === SELECT AND DISPLAY FILE ===
+available_files = list_excel_files_from_repo()
 
-df = pd.DataFrame()
-if temp_data:
-    df = pd.concat(temp_data, ignore_index=True)
-elif excel_links:
-    selected_file = st.selectbox("📁 Pilih File dari Google Drive:", list(excel_links.keys()))
-    df = load_excel_from_url(excel_links[selected_file], selected_file)
-    if df.empty:
-        st.warning("⚠️ Tidak ada data ditemukan. Pastikan folder Google Drive dapat diakses publik dan berisi file .xlsx.")
+if available_files:
+    selected_file = st.selectbox("📁 Pilih file dari penyimpanan Hugging Face:", available_files)
+    df = load_excel_from_repo(selected_file)
+
+    if not df.empty:
+        st.markdown("### 📈 Data yang Dimuat")
+        st.dataframe(df)
+else:
+    st.warning("⚠️ Belum ada file .xlsx yang tersedia di penyimpanan Hugging Face.")
