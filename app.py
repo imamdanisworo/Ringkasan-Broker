@@ -151,7 +151,7 @@ if not combined_df.empty:
                             markers=True
                         )
                         fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
-                        st.plotly_chart(fig, use_container_width=True)
+                        # st.plotly_chart removed due to error-prone chart rendering
                     else:
                         st.info(f"No data to chart for {field}.")
 
@@ -170,23 +170,7 @@ if not combined_df.empty:
                 display_df["Tanggal"] = display_df["Tanggal"].dt.strftime('%d-%b-%y')
                 display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
-                st.markdown("---")
-                st.subheader("📊 Chart - Raw Values")
-
-                for idx, field in enumerate(selected_fields):
-                    chart_data = merged_df[merged_df["Field"] == field].dropna()
-                    if not chart_data.empty:
-                        fig = px.line(
-                            chart_data,
-                            x="Tanggal",
-                            y="Value",
-                            color="Broker",
-                            title=f"{field} over Time",
-                            markers=True
-                        )
-                        fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
-                        with st.container():
-                            st.plotly_chart(fig, use_container_width=True)  # Add invisible line to avoid duplicate element ID
+                  # Add invisible line to avoid duplicate element ID
 
                 st.markdown("---")
                 st.subheader("💸 Chart - Percentage Contribution (%)")
