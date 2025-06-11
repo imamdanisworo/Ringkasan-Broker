@@ -185,8 +185,8 @@ if not combined_df.empty:
                             markers=True
                         )
                         fig.update_layout(yaxis_title=field, xaxis_title="Tanggal")
-                        st.plotly_chart(fig, use_container_width=True)
-                        st.markdown("​")  # Add invisible line to avoid duplicate element ID
+                        with st.container():
+                            st.plotly_chart(fig, use_container_width=True)  # Add invisible line to avoid duplicate element ID
 
                 st.markdown("---")
                 st.subheader("💸 Chart - Percentage Contribution (%)")
