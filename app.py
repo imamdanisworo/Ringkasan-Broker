@@ -8,7 +8,7 @@ import io
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 
 st.set_page_config(page_title="Financial Broker Summary", layout="wide")
-st.title("\ud83d\udcca Ringkasan Broker")
+st.title("📊 Ringkasan Broker")
 
 # === CONFIG ===
 REPO_ID = "imamdanisworo/broker-storage"
