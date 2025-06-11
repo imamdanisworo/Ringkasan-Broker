@@ -135,7 +135,8 @@ if not combined_df.empty:
                 display_df = display_df.sort_values(["Tanggal", "Broker", "Field"])
 
                 # Calculate total per day and field for percentage
-                total_df = melted_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
+                total_df = combined_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields, var_name="Field", value_name="Value")
+                total_df = total_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
                 total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
                 merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"])
                 merged_df["Percentage"] = merged_df.apply(
