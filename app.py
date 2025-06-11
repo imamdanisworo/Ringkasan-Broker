@@ -72,22 +72,34 @@ if not combined_df.empty:
     with col3:
         min_date, max_date = combined_df["Tanggal"].min().date(), combined_df["Tanggal"].max().date()
         display_mode = st.selectbox("Display Mode", ["Daily", "Monthly", "Yearly"])
-        
+
+        today = datetime.today()
+        year_start = datetime(today.year, 1, 1).date()
+
         if display_mode == "Daily":
-            date_from = st.date_input("From", min_value=min_date, max_value=max_date, value=min_date)
+            date_from = st.date_input("From", min_value=min_date, max_value=max_date, value=year_start)
             date_to = st.date_input("To", min_value=min_date, max_value=max_date, value=max_date)
         elif display_mode == "Monthly":
-            months = sorted(combined_df["Tanggal"].dt.to_period("M").unique())
-            selected_months = st.multiselect("Month(s)", months, default=[months[0]])
-            date_from = min(m.to_timestamp() for m in selected_months)
-            date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
+            all_months = combined_df["Tanggal"].dt.to_period("M")
+            unique_years = sorted(set(m.year for m in all_months.unique()))
+            selected_year = st.selectbox("Year", unique_years)
+            months = sorted([m for m in all_months.unique() if m.year == selected_year])
+            selected_months = st.multiselect("Month(s)", months, default=[])
+            if selected_months:
+                date_from = min(m.to_timestamp() for m in selected_months)
+                date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
+            else:
+                date_from = date_to = None
         elif display_mode == "Yearly":
             years = sorted(combined_df["Tanggal"].dt.year.unique())
-            selected_years = st.multiselect("Year(s)", years, default=[years[0]])
-            date_from = datetime(min(selected_years), 1, 1).date()
-            date_to = datetime(max(selected_years), 12, 31).date()
+            selected_years = st.multiselect("Year(s)", years, default=[])
+            if selected_years:
+                date_from = datetime(min(selected_years), 1, 1).date()
+                date_to = datetime(max(selected_years), 12, 31).date()
+            else:
+                date_from = date_to = None
 
-    if selected_brokers and selected_fields:
+    if selected_brokers and selected_fields and date_from and date_to:
         filtered_df = combined_df[
             (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
             (combined_df["Tanggal"] <= pd.to_datetime(date_to)) &
