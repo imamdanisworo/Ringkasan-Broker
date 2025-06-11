@@ -206,8 +206,9 @@ if not combined_df.empty:
                 st.plotly_chart(fig, use_container_width=True)
 
             st.markdown("---")
-            st.markdown("### 📈 Grafik Kontribusi (%)
-#### ℹ️ Menunjukkan kontribusi broker terhadap total nilai yang diperdagangkan di BEI pada hari tersebut.")
+            st.markdown("""### 📈 Grafik Kontribusi (%)
+#### ℹ️ Menunjukkan kontribusi broker terhadap total nilai yang diperdagangkan di BEI pada hari tersebut.
+""")
 
             for field in selected_fields:
                 chart_data = merged_df[merged_df["Field"] == field].dropna()
