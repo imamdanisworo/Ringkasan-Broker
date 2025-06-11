@@ -143,11 +143,6 @@ merged_df["Percentage"] = merged_df.apply(
     axis=1
 )
 
-            merged_df["Percentage"] = merged_df.apply(
-                lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0,
-                axis=1
-            )
-
             display_df = merged_df.copy()
 
             if display_mode == "Monthly":
