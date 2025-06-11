@@ -187,6 +187,7 @@ if not combined_df.empty:
                     chart_data = chart_data.groupby(["Tanggal", "Broker"])[["Value", "Percentage"]].agg({"Value": "sum", "Percentage": "mean"}).reset_index()
 
                 if not chart_data.empty:
+                    chart_data["Value"] = chart_data["Value"].round(2)
                     fig = px.line(
                         chart_data,
                         x="Tanggal",
