@@ -166,7 +166,7 @@ if not combined_df.empty:
                             title=f"{field} over Time",
                             markers=True
                         )
-                        fig.update_layout(yaxis_title=field, xaxis_title="Tanggal", xaxis_tickformat='%d-%b', xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique()),)
+                        fig.update_layout(yaxis_title=field, xaxis_title="Tanggal", xaxis_tickformat='%d %b %Y', xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique()))),)
                         st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info(f"No data to chart for {field}.")
@@ -185,7 +185,7 @@ if not combined_df.empty:
                             title=f"{field} Contribution (%) Over Time",
                             markers=True
                         )
-                        fig.update_layout(yaxis_title="Percentage (%)", xaxis_title="Tanggal", xaxis_tickformat='%d-%b')
+                        fig.update_layout(yaxis_title="Percentage (%)", xaxis_title="Tanggal", xaxis_tickformat='%d %b %Y', xaxis=dict(tickmode='array', tickvals=chart_data['Tanggal'].unique()))
                         st.plotly_chart(fig, use_container_width=True)
 else:
     st.warning("No previously saved data found. Please upload Excel files.")
