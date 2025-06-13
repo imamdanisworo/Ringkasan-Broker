@@ -84,7 +84,7 @@ except Exception as e:
 st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
 
 # === File Upload Section ===
-st.subheader("📤 Upload Data")
+st.subheader("📄 Upload Data")
 st.markdown("Unggah file Excel broker harian (*.xlsx) ke penyimpanan agar dapat dianalisis.")
 
 uploaded_files = st.file_uploader(
