@@ -157,7 +157,8 @@ if not combined_df.empty:
 
         st.subheader("📋 Data Table")
 
-        display_table = grouped.sort_values("Tanggal", ascending=False).copy()  # ✅ FIX: sort by actual date
+        display_table = grouped.sort_values("Tanggal", ascending=False).reset_index(drop=True)
+        display_table.index = display_table.index[::-1]  # ✅ Only Fix: reverse index (highest number first)
         display_table["Tanggal"] = display_table["Tanggal"].dt.strftime(
             "%d %b %Y" if display_mode == "Daily" else "%b %Y" if display_mode == "Monthly" else "%Y"
         )
