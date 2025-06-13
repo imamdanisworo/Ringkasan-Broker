@@ -7,10 +7,10 @@ import os
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 from io import BytesIO
 
-# === CONFIG ===
 st.set_page_config(page_title="Ringkasan Broker", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
 
+# === CONFIG ===
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
@@ -22,36 +22,29 @@ if st.button("🔄 Refresh Data"):
 # === File Upload ===
 uploaded_files = st.file_uploader("Upload Excel Files (.xlsx)", type=["xlsx"], accept_multiple_files=True)
 if uploaded_files:
-    with st.spinner("📤 Uploading files..."):
-        for file in uploaded_files:
-            try:
-                upload_file(
-                    path_or_fileobj=file,
-                    path_in_repo=file.name,
-                    repo_id=REPO_ID,
-                    repo_type="dataset",
-                    token=HF_TOKEN
-                )
-                st.success(f"✅ Uploaded: {file.name}")
-            except Exception as e:
-                st.error(f"❌ Upload failed: {e}")
-        st.rerun()  # ⬅️ Auto-refresh to show uploaded files
+    for file in uploaded_files:
+        try:
+            upload_file(
+                path_or_fileobj=file,
+                path_in_repo=file.name,
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN
+            )
+            st.success(f"✅ Uploaded: {file.name}")
+        except Exception as e:
+            st.error(f"❌ Upload failed: {e}")
 
 # === Load Excel Files from HF ===
 @st.cache_data
 def load_excel_files():
-    api = HfApi(token=HF_TOKEN)  # ✅ Add token here
+    api = HfApi()
     files = api.list_repo_files(REPO_ID, repo_type="dataset")
     xlsx_files = [f for f in files if f.endswith(".xlsx")]
     data = []
     for file in xlsx_files:
         try:
-            file_path = hf_hub_download(
-                repo_id=REPO_ID,
-                filename=file,
-                repo_type="dataset",
-                token=HF_TOKEN  # ✅ Add token here too
-            )
+            file_path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
             match = re.search(r"(\d{8})", file)
             file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
 
@@ -68,10 +61,8 @@ def load_excel_files():
             st.warning(f"⚠️ Failed to load {file}: {e}")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-with st.spinner("📥 Loading broker data..."):
-    combined_df = load_excel_files()
+combined_df = load_excel_files()
 
-# === Main UI and Analysis ===
 if not combined_df.empty:
     combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
 
@@ -116,7 +107,7 @@ if not combined_df.empty:
         st.warning("❗ Please select at least one data field.")
     elif not date_from or not date_to:
         st.warning("❗ Please specify a valid date range.")
-    else:
+    elif selected_brokers and selected_fields and date_from and date_to:
         filtered_df = combined_df[
             (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
             (combined_df["Tanggal"] <= pd.to_datetime(date_to)) &
@@ -155,6 +146,7 @@ if not combined_df.empty:
             display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
             display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
 
+            # === REFORMATTED DATE FOR DISPLAY BUT KEEP DATETIME FOR SORTING ===
             display_df_for_table = display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
             display_df_for_table["Tanggal Display"] = display_df["Tanggal"].dt.strftime(
                 '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
@@ -162,11 +154,13 @@ if not combined_df.empty:
             display_df_for_table = display_df_for_table.sort_values("Tanggal")
             st.dataframe(display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]].rename(columns={"Tanggal Display": "Tanggal"}))
 
+            # CSV Export using raw Tanggal (datetime)
             to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
             to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
             csv = to_download.to_csv(index=False).encode("utf-8")
             st.download_button("📥 Download Table as CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
 
+            # Tabs for charts
             tab1, tab2 = st.tabs(["📈 Original Values", "📊 % Contribution"])
 
             with tab1:
