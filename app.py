@@ -14,7 +14,7 @@ st.set_page_config(page_title="📊 Ringkasan Broker Saham", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
 
 # ───────────────────────────────────────────────────────────
-# 1️⃣  UNIVERSAL HELPERS
+# 1️⃣  UNIVERSAL HELPERS (No changes)
 # ───────────────────────────────────────────────────────────
 def normalise_name(fname: str) -> str:
     """Strip trailing ' (n)' so copies overwrite originals."""
@@ -44,68 +44,90 @@ def parse_broker_excel(path_or_buf, file_name: str) -> pd.DataFrame:
     return df
 
 # ───────────────────────────────────────────────────────────
-# 2️⃣  UPLOAD HANDLING (NON-BLOCKING)
+# 2️⃣  REFINED UPLOAD HANDLING
 # ───────────────────────────────────────────────────────────
 
-# Initialize session state for upload management
-if "upload_status" not in st.session_state:
-    st.session_state.upload_status = {"files": [], "total": 0, "processed": 0, "running": False}
+# Initialize a more detailed session state for upload management
+if "upload_manager" not in st.session_state:
+    st.session_state.upload_manager = {
+        "files_to_process": [],
+        "total_files": 0,
+        "processed_count": 0,
+        "status": "idle",  # idle, processing, complete, error
+    }
 
-def start_upload_process():
-    """Callback to queue files for processing."""
+def queue_files_for_upload():
+    """Callback to queue files from the uploader into session_state."""
     if st.session_state.file_uploader:
-        status = st.session_state.upload_status
-        status["files"] = st.session_state.file_uploader
-        status["total"] = len(status["files"])
-        status["processed"] = 0
-        status["running"] = True
+        mgr = st.session_state.upload_manager
+        mgr["files_to_process"] = st.session_state.file_uploader
+        mgr["total_files"] = len(mgr["files_to_process"])
+        mgr["processed_count"] = 0
+        mgr["status"] = "processing"
+        # Clear the uploader widget itself after queueing
+        st.session_state.file_uploader = []
 
-def handle_uploads():
-    """Processes one file per rerun, keeping the UI responsive."""
-    status = st.session_state.upload_status
-    if not status["running"]:
+
+def process_upload_queue():
+    """Processes one file from the queue per Streamlit rerun."""
+    mgr = st.session_state.upload_manager
+    if mgr["status"] != "processing":
         return
 
-    api = HfApi(token=HF_TOKEN)
-    progress_bar = st.status(f"Uploading {status['total']} file(s)…", expanded=True)
+    # Create a persistent status box for the entire upload process
+    status_box = st.status(f"Uploading {mgr['total_files']} file(s)…", expanded=True)
+    
+    if mgr["files_to_process"]:
+        # Get one file from the top of the queue
+        file_to_upload = mgr["files_to_process"].pop(0)
+        mgr["processed_count"] += 1
+        
+        progress_percent = mgr["processed_count"] / mgr["total_files"]
+        progress_text = f"Uploading **{file_to_upload.name}** ({mgr['processed_count']}/{mgr['total_files']})..."
+        status_box.progress(progress_percent, text=progress_text)
 
-    if status["files"]:
-        up = status["files"].pop(0) # Get one file from the queue
-        status["processed"] += 1
-        
-        progress_text = f"Processing **{up.name}** ({status['processed']}/{status['total']})…"
-        progress_value = status["processed"] / status["total"]
-        progress_bar.progress(progress_value, text=progress_text)
-        
         try:
-            df = parse_broker_excel(up, up.name)
-            parquet_name = re.sub(
-                r"\.xlsx$", ".parquet", normalise_name(up.name), flags=re.IGNORECASE
-            )
+            api = HfApi(token=HF_TOKEN)
+            df = parse_broker_excel(file_to_upload, file_to_upload.name)
+            
+            # Convert to Parquet
+            parquet_name = re.sub(r"\.xlsx$", ".parquet", normalise_name(file_to_upload.name), flags=re.IGNORECASE)
             buf = io.BytesIO()
             df.to_parquet(buf, index=False)
             buf.seek(0)
             
+            # Upload
             upload_file(
                 path_or_fileobj=buf,
                 path_in_repo=parquet_name,
-                repo_id=REPO_ID,
-                repo_type="dataset",
-                token=HF_TOKEN,
-                commit_message=f"Add/replace broker file: {parquet_name}",
+                repo_id=REPO_ID, repo_type="dataset", token=HF_TOKEN,
+                commit_message=f"Add/replace: {parquet_name}"
             )
+            st.toast(f"✅ Successfully processed {file_to_upload.name}!", icon="🎉")
+
         except Exception as e:
-            st.error(f"Failed to process {up.name}: {e}")
-            # Continue to next file on next rerun
-        
-        st.rerun() # Rerun to process the next file in the queue
+            mgr["status"] = "error"
+            status_box.update(label=f"Error on file {file_to_upload.name}", state="error", expanded=True)
+            st.error(f"Could not process {file_to_upload.name}: {e}")
+            st.stop() # Stop execution on error
+
+        # IMPORTANT: Trigger a rerun to process the next file
+        st.rerun()
 
     else:
-        # All files are processed
-        progress_bar.update(label="✅ Upload finished! Refreshing data...", state="complete")
-        status["running"] = False
-        st.cache_data.clear() # IMPORTANT: Clear cache to load new data
-        st.rerun() # Final rerun to update the dashboard
+        # This block runs when the queue is empty
+        mgr["status"] = "complete"
+        status_box.update(label="✅ All files uploaded! Refreshing data...", state="complete")
+        st.toast("🚀 All uploads complete!", icon="🚀")
+        
+        # Reset for the next batch of uploads
+        st.session_state.upload_manager = {
+            "files_to_process": [], "total_files": 0, "processed_count": 0, "status": "idle"
+        }
+        
+        st.cache_data.clear() # The critical step to force a data refresh
+        st.rerun() # The final rerun to display the new data
+
 
 # === SIDEBAR ACTIONS ===
 with st.sidebar:
@@ -115,40 +137,46 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    # The file uploader now uses a callback to trigger the upload process
     st.file_uploader(
         "📂 Upload Excel Files",
         type=["xlsx"],
         accept_multiple_files=True,
         key="file_uploader",
-        on_change=start_upload_process, # This starts the upload
+        on_change=queue_files_for_upload,
     )
+    
+    # === DEBUGGING BOX (Optional) ===
+    # This helps see the state. You can comment it out later.
+    with st.expander("⚙️ Upload Status (for debugging)"):
+        st.json(st.session_state.upload_manager)
 
-# === PROCESS UPLOADS (main page) ===
-handle_uploads()
+
+# === TRIGGER THE UPLOAD PROCESSOR ===
+# This function will run on every rerun and check if there's work to do.
+process_upload_queue()
+
 
 # === LOAD FROM HUGGING FACE (Parquet, cached) ===
 @st.cache_data(show_spinner="📥 Loading data from Hugging Face…")
 def load_data_from_repo() -> pd.DataFrame:
+    # (This function remains unchanged)
     api = HfApi(token=HF_TOKEN)
     files = [
-        f
-        for f in api.list_repo_files(REPO_ID, repo_type="dataset")
-        if f.endswith(".parquet")
+        f for f in api.list_repo_files(REPO_ID, repo_type="dataset") if f.endswith(".parquet")
     ]
     dfs = []
     for f in files:
         try:
-            path = hf_hub_download(
-                repo_id=REPO_ID, filename=f, repo_type="dataset", token=HF_TOKEN
-            )
+            path = hf_hub_download(repo_id=REPO_ID, filename=f, repo_type="dataset", token=HF_TOKEN)
             dfs.append(parse_broker_excel(path, f))
         except Exception as e:
             st.warning(f"⚠️ Failed to load or parse {f}: {e}")
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    if not dfs:
+        return pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True)
 
-
-# === LOAD DATA (simplified) ===
+# === MAIN APP LOGIC (No changes below this line) ===
+# ... (the rest of your script from "combined_df = load_data_from_repo()" onwards) ...
 combined_df = load_data_from_repo()
 
 # === UI AND FILTERING ===
@@ -177,20 +205,16 @@ with st.container():
         )
         date_to = col2.date_input("To", min_value=min_date, max_value=max_date, value=max_date)
     elif display_mode == "Monthly":
-        # Ensure 'Tanggal' is datetime before using .dt accessor
         if pd.api.types.is_datetime64_any_dtype(combined_df["Tanggal"]):
             periods = combined_df["Tanggal"].dt.to_period("M").unique()
             months = sorted(periods, key=lambda p: (p.year, p.month))
-            # Ensure default is not empty and exists in the options
             default_months = [m for m in months[-3:] if m in months]
             selected_months = col1.multiselect("Month(s)", months, default=default_months)
             date_from = min(m.to_timestamp() for m in selected_months).date() if selected_months else None
             date_to = (
-                max(m.end_time for m in selected_months).date()
-                if selected_months
-                else None
+                max(m.end_time for m in selected_months).date() if selected_months else None
             )
-    else:  # Yearly
+    else:
         years = sorted(combined_df["Tanggal"].dt.year.unique())
         default_years = [y for y in [today.year] if y in years]
         selected_years = col1.multiselect("Year(s)", years, default=default_years)
@@ -212,21 +236,13 @@ if filtered_df.empty:
     st.warning("❌ No data found for selected filters.")
     st.stop()
 
-
-# === DATA TRANSFORMATIONS (No changes here) ===
 melted = filtered_df.melt(
-    id_vars=["Tanggal", "Broker"],
-    value_vars=selected_fields,
-    var_name="Field",
-    value_name="Value",
+    id_vars=["Tanggal", "Broker"], value_vars=selected_fields, var_name="Field", value_name="Value",
 )
 
 total = (
     filtered_df.melt(
-        id_vars=["Tanggal"],
-        value_vars=selected_fields,
-        var_name="Field",
-        value_name="TotalValue",
+        id_vars=["Tanggal"], value_vars=selected_fields, var_name="Field", value_name="TotalValue",
     )
     .groupby(["Tanggal", "Field"])['TotalValue']
     .sum()
@@ -251,8 +267,6 @@ grouped = (
 grouped["Formatted Value"] = grouped["Value"].apply(lambda x: f"{x:,.0f}")
 grouped["Formatted %"] = grouped["%"].apply(lambda x: f"{x:.2f}%")
 
-
-# === TABLE & CHARTS (No changes here) ===
 st.subheader("📋 Data Table")
 table = (
     grouped.sort_values("Tanggal", ascending=True)
@@ -264,34 +278,26 @@ table_display["Tanggal"] = table_display["Tanggal"].dt.strftime(
 )
 st.dataframe(
     table_display[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]],
-    use_container_width=True,
-    hide_index=True,
+    use_container_width=True, hide_index=True,
 )
 
 csv_export = table[["Tanggal", "Broker", "Field", "Value", "%"]].copy()
 csv_export.columns = ["Tanggal", "Broker", "Field", "Value", "Percentage"]
 st.download_button(
-    "💾 Download CSV",
-    data=csv_export.to_csv(index=False).encode("utf-8"),
-    file_name="broker_summary.csv",
-    mime="text/csv",
+    "💾 Download CSV", data=csv_export.to_csv(index=False).encode("utf-8"),
+    file_name="broker_summary.csv", mime="text/csv",
 )
 
-# === CHARTS ===
 tab1, tab2 = st.tabs(["📈 Value Trend", "📊 % Contribution"])
 for field in selected_fields:
     data = grouped[grouped["Field"] == field]
-
     with tab1:
         fig = px.line(data, x="Tanggal", y="Value", color="Broker", title=f"{field} Over Time")
         fig.update_traces(mode="lines+markers")
         fig.update_layout(hovermode="x unified", yaxis_tickformat=".2s")
         st.plotly_chart(fig, use_container_width=True)
-
     with tab2:
-        fig = px.line(
-            data, x="Tanggal", y="%", color="Broker", title=f"{field} % Contribution Over Time"
-        )
+        fig = px.line(data, x="Tanggal", y="%", color="Broker", title=f"{field} % Contribution Over Time")
         fig.update_traces(mode="lines+markers")
         fig.update_layout(hovermode="x unified", yaxis_title_text="Contribution (%)")
         st.plotly_chart(fig, use_container_width=True)
