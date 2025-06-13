@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 import plotly.express as px
 from huggingface_hub import HfApi, hf_hub_download, upload_file
+import uuid
 
 st.set_page_config(page_title="Ringkasan Broker", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
@@ -16,6 +17,13 @@ HF_TOKEN = st.secrets["HF_TOKEN"]
 api = HfApi()
 all_files_in_repo = api.list_repo_files(REPO_ID, repo_type="dataset")
 xlsx_files_in_repo = [f for f in all_files_in_repo if f.endswith(".xlsx")]
+
+# === Session Key Handling for Dynamic File Uploader ===
+if "upload_key" not in st.session_state:
+    st.session_state["upload_key"] = "file_uploader_static_key"
+if "reset_upload" in st.session_state:
+    st.session_state["upload_key"] = str(uuid.uuid4())
+    del st.session_state["reset_upload"]
 
 @st.cache_data
 def load_excel_files_with_stats():
@@ -47,7 +55,6 @@ def load_excel_files_with_stats():
 
     combined = pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-    # Build Broker from latest name for each code
     if not combined.empty:
         latest_names = (
             combined.sort_values("Tanggal")
@@ -74,16 +81,23 @@ except Exception as e:
     combined_df = pd.DataFrame()
     st.warning(f"⚠️ Gagal memuat data untuk informasi ringkasan: {e}")
 
-# === Refresh Button ===
 st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
 
 # === File Upload Section ===
-st.subheader("📤 Upload Data")
+st.subheader("📄 Upload Data")
 st.markdown("Unggah file Excel broker harian (*.xlsx) ke penyimpanan agar dapat dianalisis.")
 
-uploaded_files = st.file_uploader("Pilih file Excel", type=["xlsx"], accept_multiple_files=True)
+uploaded_files = st.file_uploader(
+    "Pilih file Excel", 
+    type=["xlsx"], 
+    accept_multiple_files=True,
+    key=st.session_state["upload_key"]
+)
+
 if uploaded_files:
-    existing_files = set(HfApi().list_repo_files(REPO_ID, repo_type="dataset"))
+    existing_files = set(api.list_repo_files(REPO_ID, repo_type="dataset"))
+    upload_success = False
+
     for file in uploaded_files:
         try:
             temp_df = pd.read_excel(file, sheet_name="Sheet1")
@@ -105,6 +119,8 @@ if uploaded_files:
                 token=HF_TOKEN
             )
             st.success(f"✅ Berhasil diunggah: {file.name}")
+            upload_success = True
+
         except Exception as e:
             st.error(f"❌ Gagal upload: {e}")
 
