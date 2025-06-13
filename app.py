@@ -20,7 +20,10 @@ xlsx_files_in_repo = [f for f in all_files_in_repo if f.endswith(".xlsx")]
 
 # === Session Key Handling for Dynamic File Uploader ===
 if "upload_key" not in st.session_state:
-    st.session_state["upload_key"] = str(uuid.uuid4())
+    st.session_state.upload_key = str(uuid.uuid4())
+if "reset_upload_key" in st.session_state and st.session_state.reset_upload_key:
+    st.session_state.upload_key = str(uuid.uuid4())
+    st.session_state.reset_upload_key = False
 
 @st.cache_data
 def load_excel_files_with_stats():
@@ -88,7 +91,7 @@ uploaded_files = st.file_uploader(
     "Pilih file Excel", 
     type=["xlsx"], 
     accept_multiple_files=True,
-    key=st.session_state["upload_key"]
+    key=st.session_state.upload_key
 )
 
 if uploaded_files:
@@ -122,7 +125,7 @@ if uploaded_files:
             st.error(f"❌ Gagal upload: {e}")
 
     if upload_success:
-        st.session_state["upload_key"] = str(uuid.uuid4())
+        st.session_state.reset_upload_key = True
         st.rerun()
 
 # === Main Logic ===
