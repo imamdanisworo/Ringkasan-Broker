@@ -42,8 +42,30 @@ if uploaded_files:
             except Exception as e:
                 st.error(f"❌ Upload failed: {e}")
 
-    # ✅ Reload data after upload (no rerun)
-    combined_df = None  # placeholder
+    # ✅ Immediately read uploaded file(s) and merge locally
+    new_data = []
+    for file in uploaded_files:
+        try:
+            match = re.search(r"(\d{8})", file.name)
+            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
+
+            df = pd.read_excel(file, sheet_name="Sheet1")
+            df.columns = df.columns.str.strip()
+
+            if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
+                df["Tanggal"] = file_date
+                df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
+                new_data.append(df)
+            else:
+                st.warning(f"⚠️ {file.name} skipped: missing required columns.")
+        except Exception as e:
+            st.warning(f"⚠️ Failed to read {file.name}: {e}")
+
+    # Combine with previous or init combined_df
+    if 'combined_df' in locals() and not combined_df.empty:
+        combined_df = pd.concat([combined_df] + new_data, ignore_index=True)
+    else:
+        combined_df = pd.concat(new_data, ignore_index=True) if new_data else pd.DataFrame()
 
 # === Load Excel Files from HF with progress bar ===
 def load_excel_files_with_progress():
@@ -83,7 +105,7 @@ def load_excel_files_with_progress():
     status.success(f"✅ Loaded {len(data)} valid file(s).")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-# === Use updated loader ===
+# === Use loader if not yet loaded ===
 if 'combined_df' not in locals():
     combined_df = load_excel_files_with_progress()
 
