@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 import plotly.express as px
 import os
+import time
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 from io import BytesIO
 
@@ -14,9 +15,14 @@ st.title("📊 Ringkasan Aktivitas Broker Saham")
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
-# === Refresh Button ===
+# === Refresh Button with Progress Bar ===
 if st.button("🔄 Refresh Data"):
     st.cache_data.clear()
+    with st.spinner("Refreshing data..."):
+        progress_bar = st.progress(0)
+        for percent in range(0, 101, 10):
+            time.sleep(0.05)
+            progress_bar.progress(percent)
     st.rerun()
 
 # === File Upload ===
