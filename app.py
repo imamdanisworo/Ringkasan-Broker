@@ -6,6 +6,7 @@ import plotly.express as px
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 from pandas.errors import EmptyDataError
 import io
+import os  # ★ NEW: needed for filename normalisation
 
 # === CONFIGURATION ===
 REPO_ID = "imamdanisworo/broker-storage"
@@ -15,10 +16,21 @@ st.set_page_config(page_title="📊 Ringkasan Broker Saham", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
 
 # ───────────────────────────────────────────────────────────
-# 1️⃣  UNIVERSAL PARSE HELPER  (Fix #3)
+# 1️⃣  UNIVERSAL HELPERS
 # ───────────────────────────────────────────────────────────
+
+def normalise_name(fname: str) -> str:
+    """
+    Remove a trailing ' (n)' before the extension so
+    'data (1).xlsx' → 'data.xlsx'.  Ensures later uploads
+    overwrite previous ones with the same logical name.
+    """
+    base, ext = os.path.splitext(fname)
+    base = re.sub(r"\s*\(\d+\)$", "", base)
+    return f"{base}{ext}"
+
 def parse_broker_excel(path_or_buf, file_name: str) -> pd.DataFrame:
-    """Read Excel or Parquet broker file and return validated DataFrame."""
+    """Read Excel/Parquet and return validated DataFrame."""
     try:
         if str(file_name).lower().endswith(".parquet"):
             df = pd.read_parquet(path_or_buf)
@@ -26,14 +38,10 @@ def parse_broker_excel(path_or_buf, file_name: str) -> pd.DataFrame:
             df = pd.read_excel(path_or_buf, sheet_name=0)
     except EmptyDataError:
         raise ValueError("File is empty.")
-    except Exception as e:
-        raise
-
     df.columns = df.columns.str.strip()
     required = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
     if not required.issubset(df.columns):
         raise ValueError("Missing required columns.")
-
     match = re.search(r"(\d{8})", file_name)
     file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
     df["Tanggal"] = file_date
@@ -51,43 +59,47 @@ with st.sidebar:
 
     uploaded_files = st.file_uploader("📂 Upload Excel Files", type=["xlsx"], accept_multiple_files=True)
 
-# === HANDLE UPLOADS (Fix #5 + #6: Parquet upload, spinner, commit msg) ===
-session_uploads = []  # will hold DataFrames for merging later
+# === HANDLE UPLOADS (Fix #5 + #6 + #7 + ★ NEW duplicate-name overwrite)
+session_uploads = []
 
 if uploaded_files:
     api = HfApi(token=HF_TOKEN)
     existing_files = api.list_repo_files(REPO_ID, repo_type="dataset")
 
-    for file in uploaded_files:
-        with st.spinner(f"📤 Uploading {file.name}…"):
-            parquet_name = re.sub(r"\.xlsx$", ".parquet", file.name, flags=re.IGNORECASE)
+    total = len(uploaded_files)
+    progress = st.progress(0, text=f"Preparing to upload {total} file(s)…")
 
-            try:
-                # Parse to validate & keep a DataFrame copy
-                df_parsed = parse_broker_excel(file, file.name)
-                session_uploads.append(df_parsed)
+    for i, file in enumerate(uploaded_files, start=1):
+        try:
+            df_parsed = parse_broker_excel(file, file.name)
+            session_uploads.append(df_parsed)
 
-                # Convert to Parquet in-memory
-                buf = io.BytesIO()
-                df_parsed.to_parquet(buf, index=False)
-                buf.seek(0)
+            # ★ NEW: normalise the target filename
+            safe_name = normalise_name(file.name)
+            parquet_name = re.sub(r"\.xlsx$", ".parquet", safe_name, flags=re.IGNORECASE)
 
-                # Overwrite notice
-                if parquet_name in existing_files:
-                    st.warning(f"{parquet_name} already exists and will be replaced.")
+            buf = io.BytesIO()
+            df_parsed.to_parquet(buf, index=False)
+            buf.seek(0)
 
-                # Upload
-                upload_file(
-                    path_or_fileobj=buf,
-                    path_in_repo=parquet_name,
-                    repo_id=REPO_ID,
-                    repo_type="dataset",
-                    token=HF_TOKEN,
-                    commit_message="Add/replace broker file"
-                )
-                st.success(f"✅ Uploaded: {file.name}")
-            except Exception as e:
-                st.error(f"❌ Failed to upload {file.name}: {e}")
+            if parquet_name in existing_files:
+                st.warning(f"{parquet_name} already exists and will be replaced.")
+
+            upload_file(
+                path_or_fileobj=buf,
+                path_in_repo=parquet_name,
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN,
+                commit_message="Add/replace broker file"
+            )
+            st.success(f"✅ Uploaded: {file.name}")
+        except Exception as e:
+            st.error(f"❌ Failed to upload {file.name}: {e}")
+
+        progress.progress(i / total, text=f"Uploaded {i}/{total} file(s)")
+
+    progress.empty()
 
 # === LOAD FROM HUGGING FACE (Fix #5) ===
 @st.cache_data(show_spinner="📥 Loading data from Hugging Face…")
@@ -95,7 +107,6 @@ def load_data_from_repo() -> pd.DataFrame:
     api = HfApi(token=HF_TOKEN)
     files = [f for f in api.list_repo_files(REPO_ID, repo_type="dataset") if f.endswith(".parquet")]
     data = []
-
     for file in files:
         try:
             path = hf_hub_download(repo_id=REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
@@ -103,13 +114,11 @@ def load_data_from_repo() -> pd.DataFrame:
             data.append(df)
         except Exception as e:
             st.warning(f"⚠️ Failed loading {file}: {e}")
-
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
 # === COMBINE REMOTE + SESSION (Fix #2) ===
 remote_df = load_data_from_repo()
 session_df = pd.concat(session_uploads, ignore_index=True) if session_uploads else pd.DataFrame()
-
 combined_df = (
     pd.concat([remote_df, session_df], ignore_index=True)
     if not remote_df.empty or not session_df.empty
@@ -159,14 +168,12 @@ if not combined_df.empty:
     if filtered_df.empty:
         st.warning("❌ No data found for selected filters.")
     else:
-        # === TRANSFORM AND DISPLAY ===
         melted = filtered_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
                                   var_name="Field", value_name="Value")
 
-        # Fix #4: build total from current filter
         total = filtered_df.melt(id_vars=["Tanggal"], value_vars=selected_fields,
-                                 var_name="Field", value_name="TotalValue")
-        total = total.groupby(["Tanggal", "Field"]).sum().reset_index()
+                                 var_name="Field", value_name="TotalValue") \
+                          .groupby(["Tanggal", "Field"]).sum().reset_index()
 
         merged = pd.merge(melted, total, on=["Tanggal", "Field"])
         merged["%"] = merged.apply(lambda r: (r["Value"] / r["TotalValue"] * 100) if r["TotalValue"] != 0 else 0, axis=1)
@@ -182,14 +189,10 @@ if not combined_df.empty:
 
         st.subheader("📋 Data Table")
         display_table = grouped.sort_values("Tanggal", ascending=False).reset_index(drop=True)
-
-        # Fix #1: reverse ROWS, not just labels
-        display_table = display_table.iloc[::-1].reset_index(drop=True)
-
+        display_table = display_table.iloc[::-1].reset_index(drop=True)  # Fix #1
         display_table["Tanggal"] = display_table["Tanggal"].dt.strftime(
             "%d %b %Y" if display_mode == "Daily" else "%b %Y" if display_mode == "Monthly" else "%Y"
         )
-
         display_table = display_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]]
         st.dataframe(display_table, use_container_width=True)
 
@@ -205,15 +208,14 @@ if not combined_df.empty:
 
             with tab1:
                 fig = px.line(data, x="Tanggal", y="Value", color="Broker", title=f"{field} Over Time")
-                # Fix #6: show markers only for ≥ Monthly
-                fig.update_traces(mode="lines" if display_mode == "Daily" else "lines+markers")
+                fig.update_traces(mode="lines" if display_mode == "Daily" else "lines+markers")  # Fix #6
                 fig.update_layout(hovermode="x unified", yaxis_tickformat=".2s")
                 st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
                 fig = px.line(data, x="Tanggal", y="%", color="Broker",
                               title=f"{field} % Contribution Over Time")
-                fig.update_traces(mode="lines" if display_mode == "Daily" else "lines+markers")
+                fig.update_traces(mode="lines" if display_mode == "Daily" else "lines+markers")  # Fix #6
                 fig.update_layout(hovermode="x unified")
                 st.plotly_chart(fig, use_container_width=True)
 else:
