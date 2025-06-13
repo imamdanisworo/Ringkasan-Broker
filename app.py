@@ -23,8 +23,10 @@ if st.button("🔄 Refresh Data"):
 uploaded_files = st.file_uploader("Upload Excel Files (.xlsx)", type=["xlsx"], accept_multiple_files=True)
 if uploaded_files:
     with st.spinner("📤 Uploading files..."):
+        all_success = True
         for file in uploaded_files:
             try:
+                file.seek(0)
                 upload_file(
                     path_or_fileobj=file,
                     path_in_repo=file.name,
@@ -34,13 +36,16 @@ if uploaded_files:
                 )
                 st.success(f"✅ Uploaded: {file.name}")
             except Exception as e:
-                st.error(f"❌ Upload failed: {e}")
-        st.rerun()  # ⬅️ Auto-refresh to show uploaded files
+                all_success = False
+                st.error(f"❌ Upload failed for {file.name}: {e}")
+        if all_success:
+            st.success("🎉 All files uploaded successfully!")
+        st.rerun()
 
 # === Load Excel Files from HF ===
 @st.cache_data
 def load_excel_files():
-    api = HfApi(token=HF_TOKEN)  # ✅ Add token here
+    api = HfApi(token=HF_TOKEN)
     files = api.list_repo_files(REPO_ID, repo_type="dataset")
     xlsx_files = [f for f in files if f.endswith(".xlsx")]
     data = []
@@ -50,7 +55,7 @@ def load_excel_files():
                 repo_id=REPO_ID,
                 filename=file,
                 repo_type="dataset",
-                token=HF_TOKEN  # ✅ Add token here too
+                token=HF_TOKEN
             )
             match = re.search(r"(\d{8})", file)
             file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
