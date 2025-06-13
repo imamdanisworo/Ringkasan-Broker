@@ -32,10 +32,12 @@ def parse_broker_excel(path_or_buf, file_name: str) -> pd.DataFrame:
         )
     except EmptyDataError:
         raise ValueError("File is empty.")
+
     df.columns = df.columns.str.strip()
     required = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
     if not required.issubset(df.columns):
         raise ValueError("Missing required columns.")
+
     m = re.search(r"(\d{8})", file_name)
     df["Tanggal"] = (
         datetime.strptime(m.group(1), "%Y%m%d").date() if m else datetime.today().date()
@@ -52,19 +54,17 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    # key lets us reset widget after upload
     uploaded_files = st.file_uploader(
         "📂 Upload Excel Files",
         type=["xlsx"],
         accept_multiple_files=True,
-        key="file_uploader",
+        key="file_uploader",      # key lets us reset widget later
     )
 
-# === HANDLE UPLOADS (smooth UI + overwrite logic) ===
+# === HANDLE UPLOADS ===
 session_uploads = []
 if uploaded_files:
     api = HfApi(token=HF_TOKEN)
-    existing = api.list_repo_files(REPO_ID, repo_type="dataset")
     total = len(uploaded_files)
 
     status = st.status(f"Uploading {total} file(s)…", expanded=True)
@@ -98,11 +98,12 @@ if uploaded_files:
     bar.empty()
     status.update(state="complete", expanded=False)
 
-    # reset uploader & rerun once so UI appears immediately
+    # clear data cache so next run loads fresh files, reset uploader, then rerun once
+    st.cache_data.clear()
     st.session_state["file_uploader"] = None
     st.experimental_rerun()
 
-# === LOAD FROM HUGGING FACE (Parquet, cached) ===
+# === LOAD FROM HUGGING FACE (cached) ===
 @st.cache_data(show_spinner="📥 Loading data from Hugging Face…")
 def load_data_from_repo() -> pd.DataFrame:
     api = HfApi(token=HF_TOKEN)
@@ -122,20 +123,10 @@ def load_data_from_repo() -> pd.DataFrame:
             st.warning(f"⚠️ Failed loading {f}: {e}")
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-
-# === COMBINE REMOTE + SESSION DATA (merge logic) ===
-remote_df = load_data_from_repo()
-session_df = (
-    pd.concat(session_uploads, ignore_index=True) if session_uploads else pd.DataFrame()
-)
-combined_df = (
-    pd.concat([remote_df, session_df], ignore_index=True)
-    if not remote_df.empty or not session_df.empty
-    else pd.DataFrame()
-)
+combined_df = load_data_from_repo()
 
 # === UI AND FILTERING ===
-if combined_df.empty():
+if combined_df.empty:            # ✅ fixed typo (property, not callable)
     st.info("📤 Upload Excel files to get started.")
     st.stop()
 
@@ -159,6 +150,7 @@ with st.container():
             "From", min_value=min_date, max_value=max_date, value=year_start
         )
         date_to = col2.date_input("To", min_value=min_date, max_value=max_date, value=max_date)
+
     elif display_mode == "Monthly":
         periods = combined_df["Tanggal"].dt.to_period("M").unique()
         months = sorted(periods, key=lambda p: (p.year, p.month))
@@ -169,6 +161,7 @@ with st.container():
             if selected_months
             else None
         )
+
     else:  # Yearly
         years = sorted(combined_df["Tanggal"].dt.year.unique())
         selected_years = col1.multiselect("Year(s)", years, default=[today.year])
