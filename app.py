@@ -214,26 +214,11 @@ if not combined_df.empty:
                         title=f"{field} dari waktu ke waktu",
                         markers=True
                     )
-
-                    # Custom Y-axis for Billion (G -> B)
-                    max_y = chart_data["Value"].max()
-                    tickvals = []
-                    ticktext = []
-
-                    for i in range(1, int(max_y / 1e9) + 2):  # +2 to ensure coverage
-                        val = i * 1e9
-                        tickvals.append(val)
-                        ticktext.append(f"{i}B")
-
                     fig.update_layout(
+                        yaxis_tickformat=".2s",
                         xaxis_title="Tanggal",
-                        yaxis=dict(
-                            tickvals=tickvals,
-                            ticktext=ticktext
-                        ),
                         hovermode="x unified"
                     )
-
                     st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
