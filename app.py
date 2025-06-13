@@ -25,6 +25,22 @@ with st.sidebar:
 # === HANDLE UPLOADS ===
 combined_df = pd.DataFrame()
 
+def read_uploaded_files(files):
+    data = []
+    for file in files:
+        try:
+            match = re.search(r"(\d{8})", file.name)
+            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
+            df = pd.read_excel(file, sheet_name="Sheet1")
+            df.columns = df.columns.str.strip()
+            if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
+                df["Tanggal"] = file_date
+                df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
+                data.append(df)
+        except Exception as e:
+            st.warning(f"❗ {file.name} skipped: {e}")
+    return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
+
 if uploaded_files:
     api = HfApi(token=HF_TOKEN)
     existing_files = api.list_repo_files(REPO_ID, repo_type="dataset")
@@ -46,27 +62,8 @@ if uploaded_files:
             except Exception as e:
                 st.error(f"❌ Failed to upload {file.name}: {e}")
 
-    def read_uploaded_files(files):
-        data = []
-        for file in files:
-            try:
-                match = re.search(r"(\d{8})", file.name)
-                file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
-                df = pd.read_excel(file, sheet_name="Sheet1")
-                df.columns = df.columns.str.strip()
-                if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
-                    df["Tanggal"] = file_date
-                    df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
-                    data.append(df)
-            except Exception as e:
-                st.warning(f"❗ {file.name} skipped: {e}")
-        return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
-
     if "uploaded_data" not in st.session_state:
-        st.session_state.uploaded_data = pd.DataFrame()
-
-    st.session_state.uploaded_data = read_uploaded_files(uploaded_files)
-    combined_df = st.session_state.uploaded_data
+        st.session_state.uploaded_data = read_uploaded_files(uploaded_files)
 
 # === LOAD FROM HUGGING FACE ===
 @st.cache_data(show_spinner="📥 Loading data from Hugging Face...")
@@ -90,10 +87,10 @@ def load_data_from_repo():
             st.warning(f"⚠️ Failed loading {file}: {e}")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-if not uploaded_files and "uploaded_data" not in st.session_state:
-    combined_df = load_data_from_repo()
-elif "uploaded_data" in st.session_state:
+if "uploaded_data" in st.session_state:
     combined_df = st.session_state.uploaded_data
+elif not uploaded_files:
+    combined_df = load_data_from_repo()
 
 # === UI AND FILTERING ===
 if not combined_df.empty:
@@ -157,14 +154,15 @@ if not combined_df.empty:
 
         grouped["Formatted Value"] = grouped["Value"].apply(lambda x: f"{x:,.0f}")
         grouped["Formatted %"] = grouped["%"].apply(lambda x: f"{x:.2f}%")
-        grouped["Tanggal Display"] = grouped["Tanggal"].dt.strftime(
+
+        st.subheader("📋 Data Table")
+
+        display_table = grouped.sort_values("Tanggal", ascending=False).copy()  # ✅ FIX: sort by actual date
+        display_table["Tanggal"] = display_table["Tanggal"].dt.strftime(
             "%d %b %Y" if display_mode == "Daily" else "%b %Y" if display_mode == "Monthly" else "%Y"
         )
 
-        st.subheader("📋 Data Table")
-        display_table = grouped[["Tanggal", "Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
-        display_table = display_table.sort_values("Tanggal", ascending=False)
-        display_table = display_table.rename(columns={"Tanggal Display": "Tanggal"}).drop(columns=["Tanggal"])
+        display_table = display_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]]
         st.dataframe(display_table, use_container_width=True)
 
         csv_export = grouped[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
