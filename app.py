@@ -20,10 +20,7 @@ xlsx_files_in_repo = [f for f in all_files_in_repo if f.endswith(".xlsx")]
 
 # === Session Key Handling for Dynamic File Uploader ===
 if "upload_key" not in st.session_state:
-    st.session_state["upload_key"] = "file_uploader_static_key"
-if "reset_upload" in st.session_state:
     st.session_state["upload_key"] = str(uuid.uuid4())
-    del st.session_state["reset_upload"]
 
 @st.cache_data
 def load_excel_files_with_stats():
@@ -84,7 +81,7 @@ except Exception as e:
 st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
 
 # === File Upload Section ===
-st.subheader("📄 Upload Data")
+st.subheader("📤 Upload Data")
 st.markdown("Unggah file Excel broker harian (*.xlsx) ke penyimpanan agar dapat dianalisis.")
 
 uploaded_files = st.file_uploader(
@@ -125,7 +122,7 @@ if uploaded_files:
             st.error(f"❌ Gagal upload: {e}")
 
     if upload_success:
-        st.session_state["reset_upload"] = True
+        st.session_state["upload_key"] = str(uuid.uuid4())
         st.rerun()
 
 # === Main Logic ===
