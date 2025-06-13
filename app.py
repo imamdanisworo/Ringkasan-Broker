@@ -22,8 +22,13 @@ if st.button("🔄 Refresh Data"):
 # === File Upload ===
 uploaded_files = st.file_uploader("Upload Excel Files (.xlsx)", type=["xlsx"], accept_multiple_files=True)
 if uploaded_files:
+    api = HfApi(token=HF_TOKEN)
+    existing_files = api.list_repo_files(REPO_ID, repo_type="dataset")
+
     with st.spinner("📤 Uploading files..."):
         for file in uploaded_files:
+            if file.name in existing_files:
+                st.warning(f"⚠️ {file.name} already exists and will be replaced.")
             try:
                 file.seek(0)
                 upload_file(
@@ -36,7 +41,9 @@ if uploaded_files:
                 st.success(f"✅ Uploaded: {file.name}")
             except Exception as e:
                 st.error(f"❌ Upload failed: {e}")
-        st.rerun()
+
+    # ✅ Reload data after upload (no rerun)
+    combined_df = None  # placeholder
 
 # === Load Excel Files from HF with progress bar ===
 def load_excel_files_with_progress():
@@ -77,7 +84,8 @@ def load_excel_files_with_progress():
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
 # === Use updated loader ===
-combined_df = load_excel_files_with_progress()
+if 'combined_df' not in locals():
+    combined_df = load_excel_files_with_progress()
 
 # === Main UI and Analysis ===
 if not combined_df.empty:
