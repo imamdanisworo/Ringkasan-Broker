@@ -1,188 +1,201 @@
 import streamlit as st
 import pandas as pd
-import re, io, os
+import re
 from datetime import datetime
 import plotly.express as px
+import os
 from huggingface_hub import HfApi, hf_hub_download, upload_file
-from pandas.errors import EmptyDataError
+from io import BytesIO
 
-# ────────── CONFIG ──────────
-REPO_ID  = "imamdanisworo/broker-storage"
-HF_TOKEN = st.secrets["HF_TOKEN"]          # token must have WRITE scope
-
-st.set_page_config("📊 Ringkasan Broker", layout="wide")
+st.set_page_config(page_title="Ringkasan Broker", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
 
-UNIT = {
-    "Original":      (1,   ""),
-    "Thousands (K)": (1e3, " K"),
-    "Millions (M)":  (1e6, " M"),
-    "Billions (B)":  (1e9, " B"),
-}
+# === CONFIG ===
+REPO_ID = "imamdanisworo/broker-storage"
+HF_TOKEN = st.secrets["HF_TOKEN"]
 
-# ────────── HELPERS ─────────
-def strip_copy_suffix(name: str) -> str:
-    """data (1).xlsx  → data.xlsx  (for overwriting)."""
-    base, ext = os.path.splitext(name)
-    base = re.sub(r"\s*\(\d+\)$", "", base)
-    return f"{base}{ext}"
-
-def to_df(buf_or_path, fname):
-    df = (pd.read_parquet(buf_or_path)
-          if fname.lower().endswith(".parquet")
-          else pd.read_excel(buf_or_path, sheet_name=0))
-    df.columns = df.columns.str.strip()
-    need = {"Kode Perusahaan","Nama Perusahaan","Volume","Nilai","Frekuensi"}
-    if not need.issubset(df.columns):
-        raise ValueError("columns missing")
-    m = re.search(r"(\d{8})", fname)
-    df["Tanggal"] = datetime.strptime(m.group(1),"%Y%m%d").date() if m else datetime.today().date()
-    df["Broker"]  = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
-    return df
-
-@st.cache_data(show_spinner="📥 Downloading broker files…")
-def load_repo():
-    api  = HfApi(token=HF_TOKEN)
-    files= [f for f in api.list_repo_files(REPO_ID, repo_type="dataset") if f.endswith(".parquet")]
-    outs = []
-    for f in files:
-        try:
-            path = hf_hub_download(REPO_ID, f, repo_type="dataset", token=HF_TOKEN)
-            outs.append(to_df(path, f))
-        except Exception as e:
-            st.warning(f"{f} skipped ({e})")
-    return pd.concat(outs, ignore_index=True) if outs else pd.DataFrame()
-
-# ────────── CALLBACK for uploads ─────────
-def handle_upload():
-    files = st.session_state.get("upload_buffer", [])
-    if not files:
-        return
-
-    api = HfApi(token=HF_TOKEN)
-    ok, fail = 0,0
-    with st.spinner("⏫ Uploading…"):
-        for up in files:
-            try:
-                df   = to_df(up, up.name)
-                buf  = io.BytesIO(); df.to_parquet(buf, index=False); buf.seek(0)
-                tgt  = re.sub(r"\.xlsx$", ".parquet", strip_copy_suffix(up.name), flags=re.I)
-                upload_file(buf, tgt, REPO_ID, repo_type="dataset",
-                            token=HF_TOKEN, commit_message="Add/replace broker file")
-                # merge to session data so it shows instantly after rerun
-                if "data" in st.session_state and not st.session_state.data.empty:
-                    st.session_state.data = pd.concat([st.session_state.data, df], ignore_index=True)
-                ok += 1
-            except Exception as e:
-                fail += 1
-                st.error(f"{up.name} failed: {e}")
-
-    st.success(f"Upload complete – {ok} success, {fail} failed.")
-    # clear cache so fresh files load on next run
+# === Refresh Button ===
+if st.button("🔄 Refresh Data"):
     st.cache_data.clear()
-    # clear uploader widget & rerun once
-    st.session_state["file_uploader"] = None
-    st.session_state["upload_buffer"] = []
-    st.experimental_rerun()
+    st.rerun()
 
-# ────────── SIDEBAR ─────────
-with st.sidebar:
-    st.header("🔧 Controls")
-    if st.button("🔄 Full reload"):
-        st.cache_data.clear(); st.session_state.pop("data",None); st.experimental_rerun()
+# === File Upload ===
+uploaded_files = st.file_uploader("Upload Excel Files (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+if uploaded_files:
+    for file in uploaded_files:
+        try:
+            upload_file(
+                path_or_fileobj=file,
+                path_in_repo=file.name,
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN
+            )
+            st.success(f"✅ Uploaded: {file.name}")
+        except Exception as e:
+            st.error(f"❌ Upload failed: {e}")
 
-    st.file_uploader(
-        "Add Excel files", type=["xlsx"], accept_multiple_files=True,
-        key="file_uploader", on_change=handle_upload,
-        help="Drop one or more XLSX files here.",
-    )
+# === Load Excel Files from HF ===
+@st.cache_data
+def load_excel_files():
+    api = HfApi()
+    files = api.list_repo_files(REPO_ID, repo_type="dataset")
+    xlsx_files = [f for f in files if f.endswith(".xlsx")]
+    data = []
+    for file in xlsx_files:
+        try:
+            file_path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
+            match = re.search(r"(\d{8})", file)
+            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
 
-# Streamlit passes uploaded files to state key 'file_uploader'.  
-# We copy them to 'upload_buffer' so callback can access:
-if st.session_state.get("file_uploader") and not st.session_state.get("upload_buffer"):
-    st.session_state["upload_buffer"] = st.session_state.file_uploader
+            df = pd.read_excel(file_path, sheet_name="Sheet1")
+            df.columns = df.columns.str.strip()
 
-# ────────── DATAFRAME ─────────
-if "data" not in st.session_state:
-    st.session_state.data = load_repo()
+            if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
+                df["Tanggal"] = file_date
+                df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
+                data.append(df)
+            else:
+                st.warning(f"⚠️ {file} skipped: missing required columns.")
+        except Exception as e:
+            st.warning(f"⚠️ Failed to load {file}: {e}")
+    return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-df = st.session_state.data.copy()
-if df.empty:
-    st.info("No data yet. Upload Excel files to begin."); st.stop()
+combined_df = load_excel_files()
 
-# ────────── FILTER UI ─────────
-df["Tanggal"] = pd.to_datetime(df["Tanggal"])
-min_d,max_d   = df["Tanggal"].dt.date.min(), df["Tanggal"].dt.date.max()
-today         = datetime.today().date()
+if not combined_df.empty:
+    combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
 
-st.subheader("🎛️ Filters")
-c1,c2,c3,c4 = st.columns([2,2,2,2])
-brokers = c1.multiselect("Broker", sorted(df["Broker"].unique()))
-fields  = c2.multiselect("Field", ["Volume","Nilai","Frekuensi"])
-mode    = c3.selectbox("Mode", ["Daily","Monthly","Yearly"])
-unit    = c4.selectbox("Unit", list(UNIT), index=2)
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        selected_brokers = st.multiselect("Select Broker(s)", sorted(combined_df["Broker"].unique()))
+    with col2:
+        selected_fields = st.multiselect("Select Fields", ["Volume", "Nilai", "Frekuensi"])
+    with col3:
+        min_date, max_date = combined_df["Tanggal"].min().date(), combined_df["Tanggal"].max().date()
+        display_mode = st.selectbox("Display Mode", ["Daily", "Monthly", "Yearly"])
 
-# date controls
-if mode=="Daily":
-    d_from = c1.date_input("From", min_d)
-    d_to   = c2.date_input("To",   max_d)
-elif mode=="Monthly":
-    months = sorted(df["Tanggal"].dt.to_period("M").unique())
-    sel_m  = c1.multiselect("Months", months, default=months[-3:])
-    d_from = min(m.to_timestamp() for m in sel_m) if sel_m else None
-    d_to   = max((m+1).to_timestamp()-pd.Timedelta(days=1) for m in sel_m) if sel_m else None
+        today = datetime.today()
+        year_start = datetime(today.year, 1, 1).date()
+
+        if display_mode == "Daily":
+            date_from = st.date_input("From", min_value=min_date, max_value=max_date, value=year_start)
+            date_to = st.date_input("To", min_value=min_date, max_value=max_date, value=max_date)
+        elif display_mode == "Monthly":
+            all_months = combined_df["Tanggal"].dt.to_period("M")
+            unique_years = sorted(set(m.year for m in all_months.unique()))
+            selected_years = st.multiselect("Year(s)", unique_years, default=[today.year])
+            months = sorted([m for m in all_months.unique() if m.year in selected_years])
+            selected_months = st.multiselect("Month(s)", months, default=months)
+            if selected_months:
+                date_from = min(m.to_timestamp() for m in selected_months)
+                date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
+            else:
+                date_from = date_to = None
+        elif display_mode == "Yearly":
+            years = sorted(combined_df["Tanggal"].dt.year.unique())
+            selected_years = st.multiselect("Year(s)", years, default=[today.year])
+            if selected_years:
+                date_from = datetime(min(selected_years), 1, 1).date()
+                date_to = datetime(max(selected_years), 12, 31).date()
+            else:
+                date_from = date_to = None
+
+    if not selected_brokers:
+        st.warning("❗ Please select at least one broker.")
+    elif not selected_fields:
+        st.warning("❗ Please select at least one data field.")
+    elif not date_from or not date_to:
+        st.warning("❗ Please specify a valid date range.")
+    elif selected_brokers and selected_fields and date_from and date_to:
+        filtered_df = combined_df[
+            (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
+            (combined_df["Tanggal"] <= pd.to_datetime(date_to)) &
+            (combined_df["Broker"].isin(selected_brokers))
+        ]
+
+        if not filtered_df.empty:
+            melted_df = filtered_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
+                                         var_name="Field", value_name="Value")
+            total_df = combined_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
+                                        var_name="Field", value_name="Value")
+            total_df = total_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
+            total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
+
+            merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"])
+            merged_df["Percentage"] = merged_df.apply(
+                lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0, axis=1)
+
+            display_df = merged_df.copy()
+
+            if display_mode == "Monthly":
+                display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
+                display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                display_df = display_df[
+                    (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
+                    (display_df["Tanggal"] <= pd.to_datetime(date_to))
+                ]
+            elif display_mode == "Yearly":
+                display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("Y").dt.to_timestamp()
+                display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                display_df = display_df[
+                    (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
+                    (display_df["Tanggal"] <= pd.to_datetime(date_to))
+                ]
+
+            display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
+            display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
+
+            # === REFORMATTED DATE FOR DISPLAY BUT KEEP DATETIME FOR SORTING ===
+            display_df_for_table = display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
+            display_df_for_table["Tanggal Display"] = display_df["Tanggal"].dt.strftime(
+                '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
+            )
+            display_df_for_table = display_df_for_table.sort_values("Tanggal")
+            st.dataframe(display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]].rename(columns={"Tanggal Display": "Tanggal"}))
+
+            # CSV Export using raw Tanggal (datetime)
+            to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
+            to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
+            csv = to_download.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Download Table as CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
+
+            # Tabs for charts
+            tab1, tab2 = st.tabs(["📈 Original Values", "📊 % Contribution"])
+
+            with tab1:
+                for field in selected_fields:
+                    chart_data = display_df[display_df["Field"] == field].copy()
+                    fig = px.line(
+                        chart_data,
+                        x="Tanggal",
+                        y="Value",
+                        color="Broker",
+                        title=f"{field} over Time",
+                        markers=True
+                    )
+                    fig.update_layout(
+                        yaxis_tickformat=".2s",
+                        xaxis_title="Tanggal",
+                        hovermode="x unified"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+            with tab2:
+                for field in selected_fields:
+                    chart_data = display_df[display_df["Field"] == field].copy()
+                    fig = px.line(
+                        chart_data,
+                        x="Tanggal",
+                        y="Percentage",
+                        color="Broker",
+                        title=f"{field} Contribution (%) Over Time",
+                        markers=True
+                    )
+                    fig.update_layout(
+                        xaxis_title="Tanggal",
+                        hovermode="x unified"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
 else:
-    years  = sorted(df["Tanggal"].dt.year.unique())
-    sel_y  = c1.multiselect("Years", years, default=[today.year])
-    d_from = datetime(min(sel_y),1,1) if sel_y else None
-    d_to   = datetime(max(sel_y),12,31) if sel_y else None
-
-if not brokers or not fields or not d_from or not d_to:
-    st.warning("Select broker(s), field(s) and date range."); st.stop()
-
-mask = (df["Tanggal"].between(pd.to_datetime(d_from), pd.to_datetime(d_to))
-        & df["Broker"].isin(brokers))
-data = df[mask]
-if data.empty:
-    st.warning("No data for those filters."); st.stop()
-
-# ────────── TRANSFORM ─────────
-m   = data.melt(id_vars=["Tanggal","Broker"], value_vars=fields,
-                var_name="Field", value_name="Value")
-tot = data.melt(id_vars=["Tanggal"], value_vars=fields,
-                var_name="Field", value_name="Tot").groupby(
-                ["Tanggal","Field"]).sum().reset_index()
-mg  = m.merge(tot,on=["Tanggal","Field"])
-mg["Pct"] = (mg["Value"]/mg["Tot"]).fillna(0)*100
-if mode=="Monthly": mg["Tanggal"]=mg["Tanggal"].dt.to_period("M").dt.to_timestamp()
-if mode=="Yearly" : mg["Tanggal"]=mg["Tanggal"].dt.to_period("Y").dt.to_timestamp()
-
-grp = mg.groupby(["Tanggal","Broker","Field"]).agg(Value=("Value","sum"), Pct=("Pct","mean")).reset_index()
-
-div,suf = UNIT[unit]
-grp["Scaled"] = grp["Value"]/div
-grp["Val_fmt"]= grp["Scaled"].apply(lambda x:f"{x:,.0f}{suf}")
-grp["Pct_fmt"]= grp["Pct"].apply(lambda x:f"{x:.2f}%")
-
-# ─── Table
-st.subheader("📋 Table")
-tab = grp.sort_values("Tanggal")
-tab["Tanggal"]=tab["Tanggal"].dt.strftime("%d %b %Y" if mode=="Daily"
-                                          else "%b %Y" if mode=="Monthly" else "%Y")
-st.dataframe(tab[["Tanggal","Broker","Field","Val_fmt","Pct_fmt"]],
-             use_container_width=True, hide_index=True)
-
-# ─── Charts
-tab1,tab2 = st.tabs(["📈 Value","📊 % Share"])
-for f in fields:
-    sub=grp[grp["Field"]==f]
-    with tab1:
-        fig=px.line(sub,x="Tanggal",y="Scaled",color="Broker",title=f"{f} ({unit})")
-        fig.update_traces(mode="lines" if mode=="Daily" else "lines+markers")
-        fig.update_layout(hovermode="x unified",yaxis_tickformat=".2s")
-        st.plotly_chart(fig,use_container_width=True)
-    with tab2:
-        fig=px.line(sub,x="Tanggal",y="Pct",color="Broker",title=f"{f} % share")
-        fig.update_traces(mode="lines" if mode=="Daily" else "lines+markers")
-        fig.update_layout(hovermode="x unified")
-        st.plotly_chart(fig,use_container_width=True)
+    st.info("⬆️ Silakan unggah file Excel terlebih dahulu.")
