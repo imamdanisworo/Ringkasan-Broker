@@ -1,6 +1,4 @@
 streamlit
 pandas
-openpyxl          # Excel reader for .xlsx uploads
+openpyxl
 huggingface_hub
-plotly            # charting library used via plotly.express
-pyarrow           # Parquet engine for to_parquet / read_parquet
