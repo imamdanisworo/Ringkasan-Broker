@@ -44,15 +44,18 @@ if uploaded_files:
                 st.error(f"❌ Upload failed: {e}")
         st.rerun()
 
-# === Load Excel Files from HF with Progress Bar ===
+# === Load Excel Files from HF with Progress Bar + File Count ===
 def load_excel_files_with_progress():
     api = HfApi(token=HF_TOKEN)
     files = api.list_repo_files(REPO_ID, repo_type="dataset")
     xlsx_files = [f for f in files if f.endswith(".xlsx")]
+    total_files = len(xlsx_files)
     progress = st.progress(0)
+    status = st.empty()
     data = []
 
     for idx, file in enumerate(xlsx_files):
+        status.info(f"📥 Loading file {idx + 1} of {total_files}...")
         try:
             file_path = hf_hub_download(
                 repo_id=REPO_ID,
@@ -74,8 +77,9 @@ def load_excel_files_with_progress():
                 st.warning(f"⚠️ {file} skipped: missing required columns.")
         except Exception as e:
             st.warning(f"⚠️ Failed to load {file}: {e}")
-        progress.progress((idx + 1) / len(xlsx_files))
+        progress.progress((idx + 1) / total_files)
 
+    status.success("✅ All files loaded.") if total_files else status.info("📁 No files found.")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
 combined_df = load_excel_files_with_progress()
