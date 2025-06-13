@@ -201,7 +201,7 @@ if not combined_df.empty:
             csv = to_download.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Unduh Tabel CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
 
-            tab1, tab2 = st.tabs(["📈 Nilai Asli", "📊 Kontribusi (%)"])
+            tab1, tab2 = st.tabs(["📈 Nilai", "📊 Kontribusi Terhadap Total (%)"])
 
             with tab1:
                 for field in selected_fields:
