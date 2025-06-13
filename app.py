@@ -21,8 +21,23 @@ st.markdown("Unggah file Excel broker harian (*.xlsx) ke penyimpanan agar dapat 
 
 uploaded_files = st.file_uploader("Pilih file Excel", type=["xlsx"], accept_multiple_files=True)
 if uploaded_files:
+    existing_files = set(HfApi().list_repo_files(REPO_ID, repo_type="dataset"))
     for file in uploaded_files:
         try:
+            # Validate structure before upload
+            temp_df = pd.read_excel(file, sheet_name="Sheet1")
+            temp_df.columns = temp_df.columns.str.strip()
+            required_columns = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
+
+            if not required_columns.issubset(temp_df.columns):
+                st.warning(f"⚠️ {file.name} tidak memiliki struktur kolom yang sesuai. File tidak diunggah.")
+                continue
+
+            # Warn if overwriting
+            if file.name in existing_files:
+                st.warning(f"⚠️ File '{file.name}' sudah ada. File ini akan ditimpa (overwrite).")
+
+            # Upload valid file
             upload_file(
                 path_or_fileobj=file,
                 path_in_repo=file.name,
