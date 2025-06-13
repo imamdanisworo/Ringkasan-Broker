@@ -63,6 +63,7 @@ if uploaded_files:
         return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
     combined_df = read_uploaded_files(uploaded_files)
+    st.experimental_rerun()  # ✅ FIX: force reload to display uploaded data
 
 # === LOAD FROM HUGGING FACE ===
 @st.cache_data(show_spinner="📥 Loading data from Hugging Face...")
@@ -87,7 +88,7 @@ def load_data_from_repo():
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
 if not uploaded_files:
-    combined_df = load_data_from_repo()  # FIXED LINE
+    combined_df = load_data_from_repo()
 
 # === UI AND FILTERING ===
 if not combined_df.empty:
@@ -158,8 +159,9 @@ if not combined_df.empty:
         )
 
         st.subheader("📋 Data Table")
-        display_table = grouped[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
-        display_table = display_table.rename(columns={"Tanggal Display": "Tanggal"}).sort_values("Tanggal", ascending=False)  # FIXED LINE
+        display_table = grouped[["Tanggal", "Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]  # ✅ FIX
+        display_table = display_table.sort_values("Tanggal", ascending=False)  # ✅ FIX: sort by datetime
+        display_table = display_table.rename(columns={"Tanggal Display": "Tanggal"}).drop(columns=["Tanggal"])  # keep display
         st.dataframe(display_table, use_container_width=True)
 
         csv_export = grouped[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
