@@ -27,7 +27,7 @@ if uploaded_files:
     api = HfApi(token=HF_TOKEN)
     existing_files = api.list_repo_files(REPO_ID, repo_type="dataset")
 
-    with st.spinner("📤 Uploading files..."):
+    with st.spinner("📄 Uploading files..."):
         for file in uploaded_files:
             if file.name in existing_files:
                 st.warning(f"⚠️ {file.name} already exists and will be replaced.")
@@ -44,7 +44,7 @@ if uploaded_files:
             except Exception as e:
                 st.error(f"❌ Upload failed: {e}")
 
-    # ✅ Immediately read uploaded file(s) and build combined_df locally
+    # Read uploaded files locally and build combined_df
     new_data = []
     for file in uploaded_files:
         try:
@@ -66,7 +66,7 @@ if uploaded_files:
     if new_data:
         combined_df = pd.concat(new_data, ignore_index=True)
 
-# === Load Excel Files from HF with progress bar ===
+# === Load Excel Files from HF ===
 def load_excel_files_with_progress():
     api = HfApi(token=HF_TOKEN)
     files = api.list_repo_files(REPO_ID, repo_type="dataset")
@@ -77,7 +77,7 @@ def load_excel_files_with_progress():
     data = []
 
     for idx, file in enumerate(xlsx_files):
-        status.info(f"📥 Loading file {idx + 1} of {total_files}...")
+        status.info(f"📅 Loading file {idx + 1} of {total_files}...")
         try:
             file_path = hf_hub_download(
                 repo_id=REPO_ID,
@@ -104,7 +104,6 @@ def load_excel_files_with_progress():
     status.success(f"✅ Loaded {len(data)} valid file(s).")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-# === Load from HF if nothing uploaded ===
 if uploaded_files is None:
     combined_df = load_excel_files_with_progress()
 
@@ -202,7 +201,7 @@ if not combined_df.empty:
             to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
             to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
             csv = to_download.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download Table as CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
+            st.download_button("📅 Download Table as CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
 
             tab1, tab2 = st.tabs(["📈 Original Values", "📊 % Contribution"])
 
