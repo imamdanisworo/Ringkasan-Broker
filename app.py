@@ -62,8 +62,11 @@ if uploaded_files:
                 st.warning(f"❗ {file.name} skipped: {e}")
         return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-    combined_df = read_uploaded_files(uploaded_files)
-    st.experimental_rerun()  # ✅ FIX: force reload to display uploaded data
+    if "uploaded_data" not in st.session_state:
+        st.session_state.uploaded_data = pd.DataFrame()
+
+    st.session_state.uploaded_data = read_uploaded_files(uploaded_files)
+    combined_df = st.session_state.uploaded_data
 
 # === LOAD FROM HUGGING FACE ===
 @st.cache_data(show_spinner="📥 Loading data from Hugging Face...")
@@ -87,8 +90,10 @@ def load_data_from_repo():
             st.warning(f"⚠️ Failed loading {file}: {e}")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-if not uploaded_files:
+if not uploaded_files and "uploaded_data" not in st.session_state:
     combined_df = load_data_from_repo()
+elif "uploaded_data" in st.session_state:
+    combined_df = st.session_state.uploaded_data
 
 # === UI AND FILTERING ===
 if not combined_df.empty:
@@ -143,7 +148,6 @@ if not combined_df.empty:
         merged = pd.merge(melted, total, on=["Tanggal", "Field"])
         merged["%"] = merged.apply(lambda r: (r["Value"] / r["TotalValue"] * 100) if r["TotalValue"] != 0 else 0, axis=1)
 
-        # Group by mode
         if display_mode == "Monthly":
             merged["Tanggal"] = merged["Tanggal"].dt.to_period("M").dt.to_timestamp()
         elif display_mode == "Yearly":
@@ -151,7 +155,6 @@ if not combined_df.empty:
 
         grouped = merged.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "%": "mean"}).reset_index()
 
-        # Format
         grouped["Formatted Value"] = grouped["Value"].apply(lambda x: f"{x:,.0f}")
         grouped["Formatted %"] = grouped["%"].apply(lambda x: f"{x:.2f}%")
         grouped["Tanggal Display"] = grouped["Tanggal"].dt.strftime(
@@ -159,9 +162,9 @@ if not combined_df.empty:
         )
 
         st.subheader("📋 Data Table")
-        display_table = grouped[["Tanggal", "Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]  # ✅ FIX
-        display_table = display_table.sort_values("Tanggal", ascending=False)  # ✅ FIX: sort by datetime
-        display_table = display_table.rename(columns={"Tanggal Display": "Tanggal"}).drop(columns=["Tanggal"])  # keep display
+        display_table = grouped[["Tanggal", "Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
+        display_table = display_table.sort_values("Tanggal", ascending=False)
+        display_table = display_table.rename(columns={"Tanggal Display": "Tanggal"}).drop(columns=["Tanggal"])
         st.dataframe(display_table, use_container_width=True)
 
         csv_export = grouped[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
@@ -169,7 +172,6 @@ if not combined_df.empty:
         st.download_button("💾 Download CSV", data=csv_export.to_csv(index=False).encode("utf-8"),
                            file_name="broker_summary.csv", mime="text/csv")
 
-        # === CHARTS ===
         tab1, tab2 = st.tabs(["📈 Value Trend", "📊 % Contribution"])
 
         for field in selected_fields:
