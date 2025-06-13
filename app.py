@@ -36,7 +36,8 @@ def load_excel_files_with_stats():
 
             if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
                 df["Tanggal"] = file_date
-                df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
+                df["Broker"] = df["Kode Perusahaan"].astype(str).str.strip() + " / " + df["Nama Perusahaan"].astype(str).str.strip()
+                df["Broker"] = df["Broker"].str.replace(r"\s+", " ", regex=True)
                 data.append(df)
                 valid_count += 1
             else:
