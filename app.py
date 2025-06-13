@@ -12,50 +12,20 @@ st.title("📊 Ringkasan Aktivitas Broker Saham")
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
-# === Refresh Button ===
-st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
+# === Dataset Info ===
+api = HfApi()
+all_files_in_repo = api.list_repo_files(REPO_ID, repo_type="dataset")
+xlsx_files_in_repo = [f for f in all_files_in_repo if f.endswith(".xlsx")]
 
-# === File Upload Section ===
-st.subheader("📤 Upload Data")
-st.markdown("Unggah file Excel broker harian (*.xlsx) ke penyimpanan agar dapat dianalisis.")
-
-uploaded_files = st.file_uploader("Pilih file Excel", type=["xlsx"], accept_multiple_files=True)
-if uploaded_files:
-    existing_files = set(HfApi().list_repo_files(REPO_ID, repo_type="dataset"))
-    for file in uploaded_files:
-        try:
-            # Validate structure before upload
-            temp_df = pd.read_excel(file, sheet_name="Sheet1")
-            temp_df.columns = temp_df.columns.str.strip()
-            required_columns = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
-
-            if not required_columns.issubset(temp_df.columns):
-                st.warning(f"⚠️ {file.name} tidak memiliki struktur kolom yang sesuai. File tidak diunggah.")
-                continue
-
-            # Warn if overwriting
-            if file.name in existing_files:
-                st.warning(f"⚠️ File '{file.name}' sudah ada. File ini akan ditimpa (overwrite).")
-
-            # Upload valid file
-            upload_file(
-                path_or_fileobj=file,
-                path_in_repo=file.name,
-                repo_id=REPO_ID,
-                repo_type="dataset",
-                token=HF_TOKEN
-            )
-            st.success(f"✅ Berhasil diunggah: {file.name}")
-        except Exception as e:
-            st.error(f"❌ Gagal upload: {e}")
-
-# === Load Excel Files from HF ===
 @st.cache_data
-def load_excel_files():
+def load_excel_files_with_stats():
     api = HfApi()
     files = api.list_repo_files(REPO_ID, repo_type="dataset")
     xlsx_files = [f for f in files if f.endswith(".xlsx")]
     data = []
+    valid_count = 0
+    invalid_files = []
+
     for file in xlsx_files:
         try:
             file_path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
@@ -68,14 +38,64 @@ def load_excel_files():
                 df["Tanggal"] = file_date
                 df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
                 data.append(df)
+                valid_count += 1
             else:
-                st.warning(f"⚠️ {file} dilewati: kolom tidak lengkap.")
+                invalid_files.append(file)
+        except Exception:
+            invalid_files.append(file)
+
+    combined = pd.concat(data, ignore_index=True) if data else pd.DataFrame()
+    return combined, valid_count, invalid_files
+
+try:
+    combined_df, valid_files, skipped_files = load_excel_files_with_stats()
+    st.info(
+        f"📂 **{len(xlsx_files_in_repo)} file Excel** ditemukan di repositori:\n\n"
+        f"✅ **{valid_files} file berhasil dimuat**, ❌ **{len(skipped_files)} file dilewati** karena kolom tidak lengkap."
+    )
+    if skipped_files:
+        with st.expander("📋 Daftar file yang dilewati", expanded=False):
+            for name in skipped_files:
+                st.write(f"- {name}")
+except Exception as e:
+    combined_df = pd.DataFrame()
+    st.warning(f"⚠️ Gagal memuat data untuk informasi ringkasan: {e}")
+
+# === Refresh Button ===
+st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
+
+# === File Upload Section ===
+st.subheader("📤 Upload Data")
+st.markdown("Unggah file Excel broker harian (*.xlsx) ke penyimpanan agar dapat dianalisis.")
+
+uploaded_files = st.file_uploader("Pilih file Excel", type=["xlsx"], accept_multiple_files=True)
+if uploaded_files:
+    existing_files = set(HfApi().list_repo_files(REPO_ID, repo_type="dataset"))
+    for file in uploaded_files:
+        try:
+            temp_df = pd.read_excel(file, sheet_name="Sheet1")
+            temp_df.columns = temp_df.columns.str.strip()
+            required_columns = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
+
+            if not required_columns.issubset(temp_df.columns):
+                st.warning(f"⚠️ {file.name} tidak memiliki struktur kolom yang sesuai. File tidak diunggah.")
+                continue
+
+            if file.name in existing_files:
+                st.warning(f"⚠️ File '{file.name}' sudah ada. File ini akan ditimpa (overwrite).")
+
+            upload_file(
+                path_or_fileobj=file,
+                path_in_repo=file.name,
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN
+            )
+            st.success(f"✅ Berhasil diunggah: {file.name}")
         except Exception as e:
-            st.warning(f"⚠️ Gagal memuat {file}: {e}")
-    return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
+            st.error(f"❌ Gagal upload: {e}")
 
-combined_df = load_excel_files()
-
+# === Main Logic ===
 if not combined_df.empty:
     combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
 
