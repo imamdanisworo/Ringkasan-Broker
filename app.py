@@ -86,8 +86,8 @@ def load_data_from_repo():
             st.warning(f"⚠️ Failed loading {file}: {e}")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-if uploaded_files is None:
-    combined_df = load_data_from_repo()
+if not uploaded_files:
+    combined_df = load_data_from_repo()  # FIXED LINE
 
 # === UI AND FILTERING ===
 if not combined_df.empty:
@@ -158,8 +158,9 @@ if not combined_df.empty:
         )
 
         st.subheader("📋 Data Table")
-        st.dataframe(grouped[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
-                     .rename(columns={"Tanggal Display": "Tanggal"}), use_container_width=True)
+        display_table = grouped[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
+        display_table = display_table.rename(columns={"Tanggal Display": "Tanggal"}).sort_values("Tanggal", ascending=False)  # FIXED LINE
+        st.dataframe(display_table, use_container_width=True)
 
         csv_export = grouped[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
         csv_export.columns = ["Tanggal", "Broker", "Field", "Value", "Percentage"]
@@ -184,4 +185,3 @@ if not combined_df.empty:
                 st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("📤 Upload Excel files to get started.")
-
