@@ -4,6 +4,8 @@ import re
 from datetime import datetime
 import plotly.express as px
 from huggingface_hub import HfApi, hf_hub_download, upload_file
+from pandas.errors import EmptyDataError
+import io
 
 # === CONFIGURATION ===
 REPO_ID = "imamdanisworo/broker-storage"
@@ -11,6 +13,33 @@ HF_TOKEN = st.secrets["HF_TOKEN"]
 
 st.set_page_config(page_title="📊 Ringkasan Broker Saham", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
+
+# ───────────────────────────────────────────────────────────
+# 1️⃣  UNIVERSAL PARSE HELPER  (Fix #3)
+# ───────────────────────────────────────────────────────────
+def parse_broker_excel(path_or_buf, file_name: str) -> pd.DataFrame:
+    """Read Excel or Parquet broker file and return validated DataFrame."""
+    try:
+        if str(file_name).lower().endswith(".parquet"):
+            df = pd.read_parquet(path_or_buf)
+        else:
+            df = pd.read_excel(path_or_buf, sheet_name=0)
+    except EmptyDataError:
+        raise ValueError("File is empty.")
+    except Exception as e:
+        raise
+
+    df.columns = df.columns.str.strip()
+    required = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
+    if not required.issubset(df.columns):
+        raise ValueError("Missing required columns.")
+
+    match = re.search(r"(\d{8})", file_name)
+    file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
+    df["Tanggal"] = file_date
+    df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
+    return df
+
 
 # === SIDEBAR ACTIONS ===
 with st.sidebar:
@@ -22,75 +51,70 @@ with st.sidebar:
 
     uploaded_files = st.file_uploader("📂 Upload Excel Files", type=["xlsx"], accept_multiple_files=True)
 
-# === HANDLE UPLOADS ===
-combined_df = pd.DataFrame()
-
-def read_uploaded_files(files):
-    data = []
-    for file in files:
-        try:
-            match = re.search(r"(\d{8})", file.name)
-            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
-            df = pd.read_excel(file, sheet_name="Sheet1")
-            df.columns = df.columns.str.strip()
-            if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
-                df["Tanggal"] = file_date
-                df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
-                data.append(df)
-        except Exception as e:
-            st.warning(f"❗ {file.name} skipped: {e}")
-    return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
+# === HANDLE UPLOADS (Fix #5 + #6: Parquet upload, spinner, commit msg) ===
+session_uploads = []  # will hold DataFrames for merging later
 
 if uploaded_files:
     api = HfApi(token=HF_TOKEN)
     existing_files = api.list_repo_files(REPO_ID, repo_type="dataset")
 
-    with st.spinner("📤 Uploading files..."):
-        for file in uploaded_files:
-            if file.name in existing_files:
-                st.warning(f"{file.name} already exists and will be replaced.")
+    for file in uploaded_files:
+        with st.spinner(f"📤 Uploading {file.name}…"):
+            parquet_name = re.sub(r"\.xlsx$", ".parquet", file.name, flags=re.IGNORECASE)
+
             try:
-                file.seek(0)
+                # Parse to validate & keep a DataFrame copy
+                df_parsed = parse_broker_excel(file, file.name)
+                session_uploads.append(df_parsed)
+
+                # Convert to Parquet in-memory
+                buf = io.BytesIO()
+                df_parsed.to_parquet(buf, index=False)
+                buf.seek(0)
+
+                # Overwrite notice
+                if parquet_name in existing_files:
+                    st.warning(f"{parquet_name} already exists and will be replaced.")
+
+                # Upload
                 upload_file(
-                    path_or_fileobj=file,
-                    path_in_repo=file.name,
+                    path_or_fileobj=buf,
+                    path_in_repo=parquet_name,
                     repo_id=REPO_ID,
                     repo_type="dataset",
-                    token=HF_TOKEN
+                    token=HF_TOKEN,
+                    commit_message="Add/replace broker file"
                 )
                 st.success(f"✅ Uploaded: {file.name}")
             except Exception as e:
                 st.error(f"❌ Failed to upload {file.name}: {e}")
 
-    if "uploaded_data" not in st.session_state:
-        st.session_state.uploaded_data = read_uploaded_files(uploaded_files)
-
-# === LOAD FROM HUGGING FACE ===
-@st.cache_data(show_spinner="📥 Loading data from Hugging Face...")
-def load_data_from_repo():
+# === LOAD FROM HUGGING FACE (Fix #5) ===
+@st.cache_data(show_spinner="📥 Loading data from Hugging Face…")
+def load_data_from_repo() -> pd.DataFrame:
     api = HfApi(token=HF_TOKEN)
-    files = [f for f in api.list_repo_files(REPO_ID, repo_type="dataset") if f.endswith(".xlsx")]
+    files = [f for f in api.list_repo_files(REPO_ID, repo_type="dataset") if f.endswith(".parquet")]
     data = []
 
-    for i, file in enumerate(files):
+    for file in files:
         try:
             path = hf_hub_download(repo_id=REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
-            match = re.search(r"(\d{8})", file)
-            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
-            df = pd.read_excel(path, sheet_name="Sheet1")
-            df.columns = df.columns.str.strip()
-            if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
-                df["Tanggal"] = file_date
-                df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
-                data.append(df)
+            df = parse_broker_excel(path, file)
+            data.append(df)
         except Exception as e:
             st.warning(f"⚠️ Failed loading {file}: {e}")
+
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-if "uploaded_data" in st.session_state:
-    combined_df = st.session_state.uploaded_data
-elif not uploaded_files:
-    combined_df = load_data_from_repo()
+# === COMBINE REMOTE + SESSION (Fix #2) ===
+remote_df = load_data_from_repo()
+session_df = pd.concat(session_uploads, ignore_index=True) if session_uploads else pd.DataFrame()
+
+combined_df = (
+    pd.concat([remote_df, session_df], ignore_index=True)
+    if not remote_df.empty or not session_df.empty
+    else pd.DataFrame()
+)
 
 # === UI AND FILTERING ===
 if not combined_df.empty:
@@ -138,7 +162,9 @@ if not combined_df.empty:
         # === TRANSFORM AND DISPLAY ===
         melted = filtered_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
                                   var_name="Field", value_name="Value")
-        total = combined_df.melt(id_vars=["Tanggal"], value_vars=selected_fields,
+
+        # Fix #4: build total from current filter
+        total = filtered_df.melt(id_vars=["Tanggal"], value_vars=selected_fields,
                                  var_name="Field", value_name="TotalValue")
         total = total.groupby(["Tanggal", "Field"]).sum().reset_index()
 
@@ -151,14 +177,15 @@ if not combined_df.empty:
             merged["Tanggal"] = merged["Tanggal"].dt.to_period("Y").dt.to_timestamp()
 
         grouped = merged.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "%": "mean"}).reset_index()
-
         grouped["Formatted Value"] = grouped["Value"].apply(lambda x: f"{x:,.0f}")
         grouped["Formatted %"] = grouped["%"].apply(lambda x: f"{x:.2f}%")
 
         st.subheader("📋 Data Table")
-
         display_table = grouped.sort_values("Tanggal", ascending=False).reset_index(drop=True)
-        display_table.index = display_table.index[::-1]  # ✅ Only Fix: reverse index (highest number first)
+
+        # Fix #1: reverse ROWS, not just labels
+        display_table = display_table.iloc[::-1].reset_index(drop=True)
+
         display_table["Tanggal"] = display_table["Tanggal"].dt.strftime(
             "%d %b %Y" if display_mode == "Daily" else "%b %Y" if display_mode == "Monthly" else "%Y"
         )
@@ -175,15 +202,18 @@ if not combined_df.empty:
 
         for field in selected_fields:
             data = grouped[grouped["Field"] == field]
+
             with tab1:
-                fig = px.line(data, x="Tanggal", y="Value", color="Broker", markers=True,
-                              title=f"{field} Over Time")
+                fig = px.line(data, x="Tanggal", y="Value", color="Broker", title=f"{field} Over Time")
+                # Fix #6: show markers only for ≥ Monthly
+                fig.update_traces(mode="lines" if display_mode == "Daily" else "lines+markers")
                 fig.update_layout(hovermode="x unified", yaxis_tickformat=".2s")
                 st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
-                fig = px.line(data, x="Tanggal", y="%", color="Broker", markers=True,
+                fig = px.line(data, x="Tanggal", y="%", color="Broker",
                               title=f"{field} % Contribution Over Time")
+                fig.update_traces(mode="lines" if display_mode == "Daily" else "lines+markers")
                 fig.update_layout(hovermode="x unified")
                 st.plotly_chart(fig, use_container_width=True)
 else:
