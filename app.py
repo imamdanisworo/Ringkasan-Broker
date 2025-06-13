@@ -3,9 +3,7 @@ import pandas as pd
 import re
 from datetime import datetime
 import plotly.express as px
-import os
 from huggingface_hub import HfApi, hf_hub_download, upload_file
-from io import BytesIO
 
 st.set_page_config(page_title="Ringkasan Broker", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
@@ -15,12 +13,13 @@ REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
 # === Refresh Button ===
-if st.button("🔄 Refresh Data"):
-    st.cache_data.clear()
-    st.rerun()
+st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
 
-# === File Upload ===
-uploaded_files = st.file_uploader("Upload Excel Files (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+# === File Upload Section ===
+st.subheader("📤 Upload Data")
+st.markdown("Unggah file Excel broker harian (*.xlsx) ke penyimpanan agar dapat dianalisis.")
+
+uploaded_files = st.file_uploader("Pilih file Excel", type=["xlsx"], accept_multiple_files=True)
 if uploaded_files:
     for file in uploaded_files:
         try:
@@ -31,9 +30,9 @@ if uploaded_files:
                 repo_type="dataset",
                 token=HF_TOKEN
             )
-            st.success(f"✅ Uploaded: {file.name}")
+            st.success(f"✅ Berhasil diunggah: {file.name}")
         except Exception as e:
-            st.error(f"❌ Upload failed: {e}")
+            st.error(f"❌ Gagal upload: {e}")
 
 # === Load Excel Files from HF ===
 @st.cache_data
@@ -47,7 +46,6 @@ def load_excel_files():
             file_path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
             match = re.search(r"(\d{8})", file)
             file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
-
             df = pd.read_excel(file_path, sheet_name="Sheet1")
             df.columns = df.columns.str.strip()
 
@@ -56,9 +54,9 @@ def load_excel_files():
                 df["Broker"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
                 data.append(df)
             else:
-                st.warning(f"⚠️ {file} skipped: missing required columns.")
+                st.warning(f"⚠️ {file} dilewati: kolom tidak lengkap.")
         except Exception as e:
-            st.warning(f"⚠️ Failed to load {file}: {e}")
+            st.warning(f"⚠️ Gagal memuat {file}: {e}")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
 combined_df = load_excel_files()
@@ -66,27 +64,31 @@ combined_df = load_excel_files()
 if not combined_df.empty:
     combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
 
-    col1, col2, col3 = st.columns([1, 1, 2])
-    with col1:
-        selected_brokers = st.multiselect("Select Broker(s)", sorted(combined_df["Broker"].unique()))
-    with col2:
-        selected_fields = st.multiselect("Select Fields", ["Volume", "Nilai", "Frekuensi"])
-    with col3:
-        min_date, max_date = combined_df["Tanggal"].min().date(), combined_df["Tanggal"].max().date()
-        display_mode = st.selectbox("Display Mode", ["Daily", "Monthly", "Yearly"])
+    with st.expander("⚙️ Filter Data", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_brokers = st.multiselect("📌 Pilih Broker", sorted(combined_df["Broker"].unique()))
+        with col2:
+            selected_fields = st.multiselect("📊 Pilih Jenis Data", ["Volume", "Nilai", "Frekuensi"])
 
+        display_mode = st.radio("🗓️ Mode Tampilan", ["Daily", "Monthly", "Yearly"], horizontal=True)
+
+        min_date, max_date = combined_df["Tanggal"].min().date(), combined_df["Tanggal"].max().date()
         today = datetime.today()
         year_start = datetime(today.year, 1, 1).date()
 
         if display_mode == "Daily":
-            date_from = st.date_input("From", min_value=min_date, max_value=max_date, value=year_start)
-            date_to = st.date_input("To", min_value=min_date, max_value=max_date, value=max_date)
+            col1, col2 = st.columns(2)
+            with col1:
+                date_from = st.date_input("Dari Tanggal", min_value=min_date, max_value=max_date, value=year_start)
+            with col2:
+                date_to = st.date_input("Sampai Tanggal", min_value=min_date, max_value=max_date, value=max_date)
         elif display_mode == "Monthly":
             all_months = combined_df["Tanggal"].dt.to_period("M")
             unique_years = sorted(set(m.year for m in all_months.unique()))
-            selected_years = st.multiselect("Year(s)", unique_years, default=[today.year])
+            selected_years = st.multiselect("Pilih Tahun", unique_years, default=[today.year])
             months = sorted([m for m in all_months.unique() if m.year in selected_years])
-            selected_months = st.multiselect("Month(s)", months, default=months)
+            selected_months = st.multiselect("Pilih Bulan", months, default=months)
             if selected_months:
                 date_from = min(m.to_timestamp() for m in selected_months)
                 date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
@@ -94,7 +96,7 @@ if not combined_df.empty:
                 date_from = date_to = None
         elif display_mode == "Yearly":
             years = sorted(combined_df["Tanggal"].dt.year.unique())
-            selected_years = st.multiselect("Year(s)", years, default=[today.year])
+            selected_years = st.multiselect("Pilih Tahun", years, default=[today.year])
             if selected_years:
                 date_from = datetime(min(selected_years), 1, 1).date()
                 date_to = datetime(max(selected_years), 12, 31).date()
@@ -102,12 +104,14 @@ if not combined_df.empty:
                 date_from = date_to = None
 
     if not selected_brokers:
-        st.warning("❗ Please select at least one broker.")
+        st.warning("❗ Silakan pilih minimal satu broker.")
     elif not selected_fields:
-        st.warning("❗ Please select at least one data field.")
+        st.warning("❗ Silakan pilih minimal satu jenis data.")
     elif not date_from or not date_to:
-        st.warning("❗ Please specify a valid date range.")
-    elif selected_brokers and selected_fields and date_from and date_to:
+        st.warning("❗ Rentang tanggal tidak valid.")
+    else:
+        st.markdown("### 📊 Hasil Ringkasan")
+
         filtered_df = combined_df[
             (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
             (combined_df["Tanggal"] <= pd.to_datetime(date_to)) &
@@ -146,22 +150,23 @@ if not combined_df.empty:
             display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
             display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
 
-            # === REFORMATTED DATE FOR DISPLAY BUT KEEP DATETIME FOR SORTING ===
             display_df_for_table = display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
             display_df_for_table["Tanggal Display"] = display_df["Tanggal"].dt.strftime(
                 '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
             )
             display_df_for_table = display_df_for_table.sort_values("Tanggal")
-            st.dataframe(display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]].rename(columns={"Tanggal Display": "Tanggal"}))
 
-            # CSV Export using raw Tanggal (datetime)
+            st.dataframe(
+                display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
+                .rename(columns={"Tanggal Display": "Tanggal"})
+            )
+
             to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
             to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
             csv = to_download.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Download Table as CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
+            st.download_button("⬇️ Unduh Tabel CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
 
-            # Tabs for charts
-            tab1, tab2 = st.tabs(["📈 Original Values", "📊 % Contribution"])
+            tab1, tab2 = st.tabs(["📈 Nilai Asli", "📊 Kontribusi (%)"])
 
             with tab1:
                 for field in selected_fields:
@@ -171,7 +176,7 @@ if not combined_df.empty:
                         x="Tanggal",
                         y="Value",
                         color="Broker",
-                        title=f"{field} over Time",
+                        title=f"{field} dari waktu ke waktu",
                         markers=True
                     )
                     fig.update_layout(
@@ -189,7 +194,7 @@ if not combined_df.empty:
                         x="Tanggal",
                         y="Percentage",
                         color="Broker",
-                        title=f"{field} Contribution (%) Over Time",
+                        title=f"Kontribusi {field} (%) dari waktu ke waktu",
                         markers=True
                     )
                     fig.update_layout(
