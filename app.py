@@ -21,6 +21,8 @@ if st.button("🔄 Refresh Data"):
 
 # === File Upload ===
 uploaded_files = st.file_uploader("Upload Excel Files (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+combined_df = pd.DataFrame()
+
 if uploaded_files:
     api = HfApi(token=HF_TOKEN)
     existing_files = api.list_repo_files(REPO_ID, repo_type="dataset")
@@ -42,7 +44,7 @@ if uploaded_files:
             except Exception as e:
                 st.error(f"❌ Upload failed: {e}")
 
-    # ✅ Immediately read uploaded file(s) and merge locally
+    # ✅ Immediately read uploaded file(s) and build combined_df locally
     new_data = []
     for file in uploaded_files:
         try:
@@ -61,11 +63,8 @@ if uploaded_files:
         except Exception as e:
             st.warning(f"⚠️ Failed to read {file.name}: {e}")
 
-    # Combine with previous or init combined_df
-    if 'combined_df' in locals() and not combined_df.empty:
-        combined_df = pd.concat([combined_df] + new_data, ignore_index=True)
-    else:
-        combined_df = pd.concat(new_data, ignore_index=True) if new_data else pd.DataFrame()
+    if new_data:
+        combined_df = pd.concat(new_data, ignore_index=True)
 
 # === Load Excel Files from HF with progress bar ===
 def load_excel_files_with_progress():
@@ -105,8 +104,8 @@ def load_excel_files_with_progress():
     status.success(f"✅ Loaded {len(data)} valid file(s).")
     return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
-# === Use loader if not yet loaded ===
-if 'combined_df' not in locals():
+# === Load from HF if nothing uploaded ===
+if uploaded_files is None:
     combined_df = load_excel_files_with_progress()
 
 # === Main UI and Analysis ===
