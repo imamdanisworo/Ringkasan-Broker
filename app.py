@@ -13,11 +13,6 @@ st.title("📊 Ringkasan Aktivitas Broker Saham")
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
-# === Dataset Info ===
-api = HfApi()
-all_files_in_repo = api.list_repo_files(REPO_ID, repo_type="dataset")
-xlsx_files_in_repo = [f for f in all_files_in_repo if f.endswith(".xlsx")]
-
 # === Session Key Handling for Dynamic File Uploader ===
 if "upload_key" not in st.session_state:
     st.session_state.upload_key = str(uuid.uuid4())
@@ -25,67 +20,15 @@ if "reset_upload_key" in st.session_state and st.session_state.reset_upload_key:
     st.session_state.upload_key = str(uuid.uuid4())
     st.session_state.reset_upload_key = False
 
+api = HfApi()
+
 @st.cache_data
-def load_excel_files_with_stats():
-    api = HfApi()
-    files = api.list_repo_files(REPO_ID, repo_type="dataset")
-    xlsx_files = [f for f in files if f.endswith(".xlsx")]
-    data = []
-    valid_count = 0
-    invalid_files = []
+def list_existing_files():
+    return set(api.list_repo_files(REPO_ID, repo_type="dataset"))
 
-    for file in xlsx_files:
-        try:
-            file_path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
-            match = re.search(r"(\d{8})", file)
-            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else datetime.today().date()
-            df = pd.read_excel(file_path, sheet_name="Sheet1")
-            df.columns = df.columns.str.strip()
-
-            if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
-                df["Tanggal"] = file_date
-                df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
-                df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
-                data.append(df)
-                valid_count += 1
-            else:
-                invalid_files.append(file)
-        except Exception:
-            invalid_files.append(file)
-
-    combined = pd.concat(data, ignore_index=True) if data else pd.DataFrame()
-
-    if not combined.empty:
-        latest_names = (
-            combined.sort_values("Tanggal")
-            .drop_duplicates("Kode Perusahaan", keep="last")
-            .set_index("Kode Perusahaan")["Nama Perusahaan"]
-        )
-        combined["Broker"] = combined["Kode Perusahaan"].apply(
-            lambda kode: f"{kode}_{latest_names.get(kode, '')}"
-        )
-
-    return combined, valid_count, invalid_files
-
-try:
-    combined_df, valid_files, skipped_files = load_excel_files_with_stats()
-    st.info(
-        f"📂 **{len(xlsx_files_in_repo)} file Excel** ditemukan di repositori:\n\n"
-        f"✅ **{valid_files} file berhasil dimuat**, ❌ **{len(skipped_files)} file dilewati** karena kolom tidak lengkap."
-    )
-    if skipped_files:
-        with st.expander("📋 Daftar file yang dilewati", expanded=False):
-            for name in skipped_files:
-                st.write(f"- {name}")
-except Exception as e:
-    combined_df = pd.DataFrame()
-    st.warning(f"⚠️ Gagal memuat data untuk informasi ringkasan: {e}")
-
-st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
-
-# === File Upload Section ===
-st.subheader("📤 Upload Data")
-st.markdown("Unggah file Excel broker harian (*.xlsx) ke penyimpanan agar dapat dianalisis.")
+# === Unified Upload & Validation ===
+st.subheader("📤 Upload & Validasi File Excel")
+st.markdown("Unggah file Excel broker harian (*.xlsx) dengan nama file `YYYYMMDD_*.xlsx` dan kolom: `Kode Perusahaan`, `Nama Perusahaan`, `Volume`, `Nilai`, `Frekuensi`.")
 
 uploaded_files = st.file_uploader(
     "Pilih file Excel", 
@@ -94,22 +37,38 @@ uploaded_files = st.file_uploader(
     key=st.session_state.upload_key
 )
 
-if uploaded_files:
-    existing_files = set(api.list_repo_files(REPO_ID, repo_type="dataset"))
-    upload_success = False
+valid_dataframes = []
+skipped_files = []
+existing_files = list_existing_files()
+upload_success = False
 
+if uploaded_files:
     for file in uploaded_files:
         try:
-            temp_df = pd.read_excel(file, sheet_name="Sheet1")
-            temp_df.columns = temp_df.columns.str.strip()
+            match = re.search(r"(\d{8})", file.name)
+            if not match:
+                st.warning(f"⚠️ {file.name} dilewati: nama file tidak mengandung tanggal (YYYYMMDD).")
+                skipped_files.append(file.name)
+                continue
+            file_date = datetime.strptime(match.group(1), "%Y%m%d").date()
+
+            df = pd.read_excel(file, sheet_name="Sheet1")
+            df.columns = df.columns.str.strip()
             required_columns = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
 
-            if not required_columns.issubset(temp_df.columns):
-                st.warning(f"⚠️ {file.name} tidak memiliki struktur kolom yang sesuai. File tidak diunggah.")
+            if not required_columns.issubset(df.columns):
+                st.warning(f"⚠️ {file.name} dilewati: kolom tidak lengkap.")
+                skipped_files.append(file.name)
                 continue
 
+            df["Tanggal"] = file_date
+            df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
+            df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
+
+            valid_dataframes.append(df)
+
             if file.name in existing_files:
-                st.warning(f"⚠️ File '{file.name}' sudah ada. File ini akan ditimpa (overwrite).")
+                st.warning(f"⚠️ File '{file.name}' sudah ada dan akan ditimpa.")
 
             upload_file(
                 path_or_fileobj=file,
@@ -122,11 +81,69 @@ if uploaded_files:
             upload_success = True
 
         except Exception as e:
-            st.error(f"❌ Gagal upload: {e}")
+            st.error(f"❌ Gagal memproses {file.name}: {e}")
+            skipped_files.append(file.name)
 
     if upload_success:
         st.session_state.reset_upload_key = True
         st.rerun()
+
+# === Load All Valid Files from Repo ===
+@st.cache_data
+def load_all_valid_excel():
+    all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
+    xlsx_files = [f for f in all_files if f.endswith(".xlsx")]
+    all_data = []
+    invalid_files = []
+
+    for file in xlsx_files:
+        try:
+            match = re.search(r"(\d{8})", file)
+            if not match:
+                invalid_files.append(file)
+                continue
+            file_date = datetime.strptime(match.group(1), "%Y%m%d").date()
+
+            path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
+            df = pd.read_excel(path, sheet_name="Sheet1")
+            df.columns = df.columns.str.strip()
+            required = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
+            if not required.issubset(df.columns):
+                invalid_files.append(file)
+                continue
+
+            df["Tanggal"] = file_date
+            df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
+            df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
+            all_data.append(df)
+        except Exception:
+            invalid_files.append(file)
+
+    combined = pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
+    if not combined.empty:
+        latest_names = (
+            combined.sort_values("Tanggal")
+            .drop_duplicates("Kode Perusahaan", keep="last")
+            .set_index("Kode Perusahaan")["Nama Perusahaan"]
+        )
+        combined["Broker"] = combined["Kode Perusahaan"].apply(
+            lambda kode: f"{kode}_{latest_names.get(kode, '')}"
+        )
+
+    return combined, len(xlsx_files), invalid_files
+
+try:
+    combined_df, valid_count, skipped = load_all_valid_excel()
+    st.info(f"📂 {valid_count} file Excel ditemukan.\n\n✅ Data berhasil dimuat, ❌ {len(skipped)} file dilewati.")
+    if skipped:
+        with st.expander("📋 File yang dilewati"):
+            for name in skipped:
+                st.write(f"- {name}")
+except Exception as e:
+    combined_df = pd.DataFrame()
+    st.warning(f"⚠️ Gagal memuat data: {e}")
+
+st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
 
 # === Main Logic ===
 if not combined_df.empty:
