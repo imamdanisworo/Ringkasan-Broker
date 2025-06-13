@@ -36,8 +36,10 @@ def load_excel_files_with_stats():
 
             if {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}.issubset(df.columns):
                 df["Tanggal"] = file_date
-                df["Broker"] = df["Kode Perusahaan"].astype(str).str.strip() + " / " + df["Nama Perusahaan"].astype(str).str.strip()
-                df["Broker"] = df["Broker"].str.replace(r"\s+", " ", regex=True)
+                df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
+                df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
+                df["Broker"] = df["Kode Perusahaan"]
+                df["Broker Info"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
                 data.append(df)
                 valid_count += 1
             else:
@@ -187,17 +189,22 @@ if not combined_df.empty:
             display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
 
             display_df_for_table = display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
+            display_df_for_table = display_df_for_table.merge(
+                combined_df[["Broker", "Broker Info"]].drop_duplicates(),
+                on="Broker",
+                how="left"
+            )
             display_df_for_table["Tanggal Display"] = display_df["Tanggal"].dt.strftime(
                 '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
             )
             display_df_for_table = display_df_for_table.sort_values("Tanggal")
 
             st.dataframe(
-                display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
-                .rename(columns={"Tanggal Display": "Tanggal"})
+                display_df_for_table[["Tanggal Display", "Broker Info", "Field", "Formatted Value", "Formatted %"]]
+                .rename(columns={"Tanggal Display": "Tanggal", "Broker Info": "Broker"})
             )
 
-            to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
+            to_download = display_df_for_table[["Tanggal", "Broker Info", "Field", "Formatted Value", "Formatted %"]].copy()
             to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
             csv = to_download.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Unduh Tabel CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
