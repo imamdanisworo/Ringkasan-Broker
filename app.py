@@ -38,8 +38,6 @@ def load_excel_files_with_stats():
                 df["Tanggal"] = file_date
                 df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
                 df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
-                df["Broker"] = df["Kode Perusahaan"]
-                df["Broker Info"] = df["Kode Perusahaan"] + " / " + df["Nama Perusahaan"]
                 data.append(df)
                 valid_count += 1
             else:
@@ -48,6 +46,18 @@ def load_excel_files_with_stats():
             invalid_files.append(file)
 
     combined = pd.concat(data, ignore_index=True) if data else pd.DataFrame()
+
+    # Build Broker from latest name for each code
+    if not combined.empty:
+        latest_names = (
+            combined.sort_values("Tanggal")
+            .drop_duplicates("Kode Perusahaan", keep="last")
+            .set_index("Kode Perusahaan")["Nama Perusahaan"]
+        )
+        combined["Broker"] = combined["Kode Perusahaan"].apply(
+            lambda kode: f"{kode}_{latest_names.get(kode, '')}"
+        )
+
     return combined, valid_count, invalid_files
 
 try:
@@ -189,22 +199,17 @@ if not combined_df.empty:
             display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
 
             display_df_for_table = display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
-            display_df_for_table = display_df_for_table.merge(
-                combined_df[["Broker", "Broker Info"]].drop_duplicates(),
-                on="Broker",
-                how="left"
-            )
             display_df_for_table["Tanggal Display"] = display_df["Tanggal"].dt.strftime(
                 '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
             )
             display_df_for_table = display_df_for_table.sort_values("Tanggal")
 
             st.dataframe(
-                display_df_for_table[["Tanggal Display", "Broker Info", "Field", "Formatted Value", "Formatted %"]]
-                .rename(columns={"Tanggal Display": "Tanggal", "Broker Info": "Broker"})
+                display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
+                .rename(columns={"Tanggal Display": "Tanggal"})
             )
 
-            to_download = display_df_for_table[["Tanggal", "Broker Info", "Field", "Formatted Value", "Formatted %"]].copy()
+            to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
             to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
             csv = to_download.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Unduh Tabel CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
