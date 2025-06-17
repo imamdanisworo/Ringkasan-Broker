@@ -9,11 +9,9 @@ import uuid
 st.set_page_config(page_title="Ringkasan Broker", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
 
-# === CONFIG ===
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = st.secrets["HF_TOKEN"]
 
-# === Session Key Handling ===
 if "upload_key" not in st.session_state:
     st.session_state.upload_key = str(uuid.uuid4())
 if "reset_upload_key" in st.session_state and st.session_state.reset_upload_key:
@@ -26,7 +24,6 @@ api = HfApi()
 def list_existing_files():
     return set(api.list_repo_files(REPO_ID, repo_type="dataset"))
 
-# === Upload and Validation ===
 st.subheader("📤 Upload File Excel")
 st.markdown("Format nama file: `YYYYMMDD_*.xlsx`. Kolom wajib: `Kode Perusahaan`, `Nama Perusahaan`, `Volume`, `Nilai`, `Frekuensi`.")
 
@@ -76,7 +73,6 @@ if uploaded_files:
         st.session_state.reset_upload_key = True
         st.rerun()
 
-# === Load All Files (No Re-validation) ===
 @st.cache_data
 def load_all_excel():
     all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
@@ -109,6 +105,16 @@ def load_all_excel():
             lambda kode: f"{kode}_{latest_names.get(kode, '')}"
         )
 
+        # Add Total Market
+        market_df = (
+            combined.groupby("Tanggal")[["Volume", "Nilai", "Frekuensi"]]
+            .sum().reset_index()
+            .assign(Broker="Total Market", FieldSource="Generated")
+        )
+        market_df["Kode Perusahaan"] = "TOTAL"
+        market_df["Nama Perusahaan"] = "Total Market"
+        combined = pd.concat([combined, market_df], ignore_index=True)
+
     return combined, len(xlsx_files)
 
 try:
@@ -120,14 +126,15 @@ except Exception as e:
 
 st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
 
-# === Main Display ===
 if not combined_df.empty:
     combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
 
     with st.expander("⚙️ Filter Data", expanded=True):
         col1, col2 = st.columns(2)
         with col1:
-            selected_brokers = st.multiselect("📌 Pilih Broker", sorted(combined_df["Broker"].unique()))
+            unique_brokers = sorted(combined_df["Broker"].unique())
+            default_selection = ["Total Market"] if "Total Market" in unique_brokers else []
+            selected_brokers = st.multiselect("📌 Pilih Broker", unique_brokers, default=default_selection)
         with col2:
             selected_fields = st.multiselect("📊 Pilih Jenis Data", ["Volume", "Nilai", "Frekuensi"])
 
