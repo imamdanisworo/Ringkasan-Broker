@@ -188,8 +188,14 @@ if not combined_df.empty:
         if not filtered_df.empty:
             melted_df = filtered_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
                                          var_name="Field", value_name="Value")
-            total_df = combined_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
-                                        var_name="Field", value_name="Value")
+
+            # ✅ FIX: Exclude "Total Market" from total denominator
+            total_df = combined_df[combined_df["Broker"] != "Total Market"].melt(
+                id_vars=["Tanggal", "Broker"],
+                value_vars=selected_fields,
+                var_name="Field",
+                value_name="Value"
+            )
             total_df = total_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
             total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
 
