@@ -95,7 +95,6 @@ def load_all_excel():
             continue
 
     combined = pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
-
     if not combined.empty:
         latest_names = (
             combined.sort_values("Tanggal")
@@ -106,18 +105,15 @@ def load_all_excel():
             lambda kode: f"{kode}_{latest_names.get(kode, '')}"
         )
 
-        # ✅ ADD TOTAL MARKET CORRECTLY
-        total_market = (
+        # Add Total Market
+        market_df = (
             combined.groupby("Tanggal")[["Volume", "Nilai", "Frekuensi"]]
-            .sum()
-            .reset_index()
-            .assign(
-                Kode_Perusahaan="TOTAL",
-                Nama_Perusahaan="Total Market",
-                Broker="Total Market"
-            )
+            .sum().reset_index()
+            .assign(Broker="Total Market", FieldSource="Generated")
         )
-        combined = pd.concat([combined, total_market[combined.columns]], ignore_index=True)
+        market_df["Kode Perusahaan"] = "TOTAL"
+        market_df["Nama Perusahaan"] = "Total Market"
+        combined = pd.concat([combined, market_df], ignore_index=True)
 
     return combined, len(xlsx_files)
 
