@@ -252,6 +252,7 @@ if not combined_df.empty:
                         title=f"{field} dari waktu ke waktu",
                         markers=True
                     )
+                    fig.update_traces(hovertemplate="%{y:,.4f}<extra></extra>")
                     fig.update_layout(
                         xaxis_title="Tanggal",
                         hovermode="x unified"
