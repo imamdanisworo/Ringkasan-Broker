@@ -301,16 +301,26 @@ if not combined_df.empty:
         ]
 
     else:  # Bulanan
-        # Extract all unique months from Tanggal column
+        # Extract month periods and unique years
         combined_df["MonthPeriod"] = combined_df["Tanggal"].dt.to_period("M")
         all_months = sorted(combined_df["MonthPeriod"].unique())
+        all_years = sorted(set(m.year for m in all_months))
         current_year = datetime.today().year
-        default_months = [m for m in all_months if m.year == current_year]
+
+        selected_years = st.multiselect(
+            "📅 Pilih Tahun",
+            options=all_years,
+            default=[current_year],
+            key="rank_year_select"
+        )
+
+        # Filter available months based on selected years
+        month_options = [m for m in all_months if m.year in selected_years]
 
         selected_months = st.multiselect(
             "📆 Pilih Bulan (bisa lebih dari satu)",
-            options=all_months,
-            default=default_months,
+            options=month_options,
+            default=month_options,
             format_func=lambda m: m.strftime("%b %Y"),
             key="selected_months"
         )
