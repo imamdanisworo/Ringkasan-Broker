@@ -275,5 +275,53 @@ if not combined_df.empty:
                         hovermode="x unified"
                     )
                     st.plotly_chart(fig, use_container_width=True)
+
+if not combined_df.empty:
+    st.markdown("---")
+    st.header("🏆 Top Broker Ranking")
+
+    # Use date range from current year to max date
+    min_rank_date = datetime(datetime.today().year, 1, 1).date()
+    max_rank_date = combined_df["Tanggal"].max().date()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        rank_date_from = st.date_input("Dari Tanggal (Ranking)", value=min_rank_date, min_value=min_rank_date, max_value=max_rank_date, key="rank_date_from")
+    with col2:
+        rank_date_to = st.date_input("Sampai Tanggal (Ranking)", value=max_rank_date, min_value=min_rank_date, max_value=max_rank_date, key="rank_date_to")
+
+    filtered_rank_df = combined_df[
+        (combined_df["Tanggal"] >= pd.to_datetime(rank_date_from)) &
+        (combined_df["Tanggal"] <= pd.to_datetime(rank_date_to)) &
+        (combined_df["Broker"] != "Total Market")
+    ]
+
+    tab_val, tab_freq, tab_vol = st.tabs(["💰 Berdasarkan Nilai", "📈 Berdasarkan Frekuensi", "📊 Berdasarkan Volume"])
+
+    def generate_top_table(df: pd.DataFrame, column: str, top_n: int = 10):
+        top_df = (
+            df.groupby("Broker")[column].sum()
+            .sort_values(ascending=False)
+            .head(top_n)
+            .reset_index()
+        )
+        top_df.index += 1
+        top_df.reset_index(inplace=True)
+        top_df.columns = ["Peringkat", "Broker", column]
+        top_df[column] = top_df[column].apply(lambda x: f"{x:,.0f}")
+        return top_df
+
+    with tab_val:
+        st.subheader("🔝 Top Broker Berdasarkan Nilai")
+        st.dataframe(generate_top_table(filtered_rank_df, "Nilai"), use_container_width=True)
+
+    with tab_freq:
+        st.subheader("🔝 Top Broker Berdasarkan Frekuensi")
+        st.dataframe(generate_top_table(filtered_rank_df, "Frekuensi"), use_container_width=True)
+
+    with tab_vol:
+        st.subheader("🔝 Top Broker Berdasarkan Volume")
+        st.dataframe(generate_top_table(filtered_rank_df, "Volume"), use_container_width=True)
+
 else:
     st.info("⬆️ Silakan unggah file Excel terlebih dahulu.")
