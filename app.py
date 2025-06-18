@@ -253,7 +253,6 @@ if not combined_df.empty:
                         markers=True
                     )
                     fig.update_layout(
-                        yaxis_tickformat=".2s",
                         xaxis_title="Tanggal",
                         hovermode="x unified"
                     )
