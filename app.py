@@ -280,48 +280,93 @@ if not combined_df.empty:
     st.markdown("---")
     st.header("🏆 Top Broker Ranking")
 
-    # Use date range from current year to max date
-    min_rank_date = datetime(datetime.today().year, 1, 1).date()
-    max_rank_date = combined_df["Tanggal"].max().date()
+    combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
 
-    col1, col2 = st.columns(2)
-    with col1:
-        rank_date_from = st.date_input("Dari Tanggal (Ranking)", value=min_rank_date, min_value=min_rank_date, max_value=max_rank_date, key="rank_date_from")
-    with col2:
-        rank_date_to = st.date_input("Sampai Tanggal (Ranking)", value=max_rank_date, min_value=min_rank_date, max_value=max_rank_date, key="rank_date_to")
+    mode = st.radio("📅 Mode Tanggal untuk Ranking", ["Harian", "Bulanan"], horizontal=True)
 
-    filtered_rank_df = combined_df[
-        (combined_df["Tanggal"] >= pd.to_datetime(rank_date_from)) &
-        (combined_df["Tanggal"] <= pd.to_datetime(rank_date_to)) &
-        (combined_df["Broker"] != "Total Market")
-    ]
+    if mode == "Harian":
+        min_rank_date = datetime(datetime.today().year, 1, 1).date()
+        max_rank_date = combined_df["Tanggal"].max().date()
 
-    tab_val, tab_freq, tab_vol = st.tabs(["💰 Berdasarkan Nilai", "📈 Berdasarkan Frekuensi", "📊 Berdasarkan Volume"])
+        col1, col2 = st.columns(2)
+        with col1:
+            rank_date_from = st.date_input("Dari Tanggal", value=min_rank_date, min_value=min_rank_date, max_value=max_rank_date, key="rank_date_from")
+        with col2:
+            rank_date_to = st.date_input("Sampai Tanggal", value=max_rank_date, min_value=min_rank_date, max_value=max_rank_date, key="rank_date_to")
 
-    def generate_top_table(df: pd.DataFrame, column: str, top_n: int = 10):
-        top_df = (
+        filtered_rank_df = combined_df[
+            (combined_df["Tanggal"] >= pd.to_datetime(rank_date_from)) &
+            (combined_df["Tanggal"] <= pd.to_datetime(rank_date_to)) &
+            (combined_df["Broker"] != "Total Market")
+        ]
+
+    else:  # Bulanan
+        # Extract all unique months from Tanggal column
+        combined_df["MonthPeriod"] = combined_df["Tanggal"].dt.to_period("M")
+        all_months = sorted(combined_df["MonthPeriod"].unique())
+        current_year = datetime.today().year
+        default_months = [m for m in all_months if m.year == current_year]
+
+        selected_months = st.multiselect(
+            "📆 Pilih Bulan (bisa lebih dari satu)",
+            options=all_months,
+            default=default_months,
+            format_func=lambda m: m.strftime("%b %Y"),
+            key="selected_months"
+        )
+
+        if selected_months:
+            filtered_rank_df = combined_df[
+                combined_df["MonthPeriod"].isin(selected_months) &
+                (combined_df["Broker"] != "Total Market")
+            ]
+        else:
+            filtered_rank_df = pd.DataFrame()
+
+    def generate_full_table(df: pd.DataFrame, column: str):
+        ranked_df = (
             df.groupby("Broker")[column].sum()
             .sort_values(ascending=False)
-            .head(top_n)
             .reset_index()
         )
-        top_df.index += 1
-        top_df.reset_index(inplace=True)
-        top_df.columns = ["Peringkat", "Broker", column]
-        top_df[column] = top_df[column].apply(lambda x: f"{x:,.0f}")
-        return top_df
+        ranked_df.index += 1
+        ranked_df.reset_index(inplace=True)
+        ranked_df.columns = ["Peringkat", "Broker", column]
+        total = ranked_df[column].sum()
+        ranked_df[column] = ranked_df[column].apply(lambda x: f"{x:,.0f}")
 
-    with tab_val:
-        st.subheader("🔝 Top Broker Berdasarkan Nilai")
-        st.dataframe(generate_top_table(filtered_rank_df, "Nilai"), use_container_width=True)
+        total_row = pd.DataFrame([{
+            "Peringkat": "",
+            "Broker": "TOTAL",
+            column: f"{total:,.0f}"
+        }])
 
-    with tab_freq:
-        st.subheader("🔝 Top Broker Berdasarkan Frekuensi")
-        st.dataframe(generate_top_table(filtered_rank_df, "Frekuensi"), use_container_width=True)
+        ranked_df = pd.concat([ranked_df, total_row], ignore_index=True)
 
-    with tab_vol:
-        st.subheader("🔝 Top Broker Berdasarkan Volume")
-        st.dataframe(generate_top_table(filtered_rank_df, "Volume"), use_container_width=True)
+        return ranked_df, total
+
+    if not filtered_rank_df.empty:
+        tab_val, tab_freq, tab_vol = st.tabs(["💰 Berdasarkan Nilai", "📈 Berdasarkan Frekuensi", "📊 Berdasarkan Volume"])
+
+        with tab_val:
+            st.subheader("🔝 Peringkat Berdasarkan Nilai")
+            df_val, total_val = generate_full_table(filtered_rank_df, "Nilai")
+            st.dataframe(df_val, use_container_width=True)
+            st.markdown(f"**Total Nilai Seluruh Broker:** Rp {total_val:,.0f}")
+
+        with tab_freq:
+            st.subheader("🔝 Peringkat Berdasarkan Frekuensi")
+            df_freq, total_freq = generate_full_table(filtered_rank_df, "Frekuensi")
+            st.dataframe(df_freq, use_container_width=True)
+            st.markdown(f"**Total Frekuensi Seluruh Broker:** {total_freq:,.0f} transaksi")
+
+        with tab_vol:
+            st.subheader("🔝 Peringkat Berdasarkan Volume")
+            df_vol, total_vol = generate_full_table(filtered_rank_df, "Volume")
+            st.dataframe(df_vol, use_container_width=True)
+            st.markdown(f"**Total Volume Seluruh Broker:** {total_vol:,.0f} lot")
+    else:
+        st.info("📌 Tidak ada data untuk rentang tanggal yang dipilih.")
 
 else:
     st.info("⬆️ Silakan unggah file Excel terlebih dahulu.")
