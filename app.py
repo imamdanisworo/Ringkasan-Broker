@@ -1,3 +1,4 @@
+import hashlib
 import streamlit as st
 import pandas as pd
 import re
@@ -379,3 +380,85 @@ if not combined_df.empty:
 
 else:
     st.info("⬆️ Silakan unggah file Excel terlebih dahulu.")
+
+@st.cache_data
+def list_existing_files():
+    return set(api.list_repo_files(REPO_ID, repo_type="dataset"))
+
+@st.cache_data
+def load_all_excel(file_hash):  # new param for caching
+    xlsx_files = [f for f in api.list_repo_files(REPO_ID, repo_type="dataset") if f.endswith(".xlsx")]
+    all_data = []
+
+    for file in xlsx_files:
+        try:
+            match = re.search(r"(\d{8})", file)
+            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
+
+            path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
+            df = pd.read_excel(path, sheet_name="Sheet1")
+            df.columns = df.columns.str.strip()
+            df["Tanggal"] = file_date
+            df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
+            df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
+            all_data.append(df)
+        except Exception:
+            continue
+
+    combined = pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
+    if not combined.empty:
+        latest_names = (
+            combined.sort_values("Tanggal")
+            .drop_duplicates("Kode Perusahaan", keep="last")
+            .set_index("Kode Perusahaan")["Nama Perusahaan"]
+        )
+        combined["Broker"] = combined["Kode Perusahaan"].apply(
+            lambda kode: f"{kode}_{latest_names.get(kode, '')}"
+        )
+
+        market_df = (
+            combined.groupby("Tanggal")[["Volume", "Nilai", "Frekuensi"]]
+            .sum().reset_index()
+            .assign(Broker="Total Market", FieldSource="Generated")
+        )
+        market_df["Kode Perusahaan"] = "TOTAL"
+        market_df["Nama Perusahaan"] = "Total Market"
+        combined = pd.concat([combined, market_df], ignore_index=True)
+
+    return combined, len(xlsx_files)
+
+# Compute file list hash before loading Excel
+file_list = api.list_repo_files(REPO_ID, repo_type="dataset")
+xlsx_files = [f for f in file_list if f.endswith(".xlsx")]
+file_hash = hashlib.md5("".join(sorted(xlsx_files)).encode()).hexdigest()
+
+try:
+    combined_df, file_count = load_all_excel(file_hash)
+    st.info(f"📂 {file_count} file Excel dimuat dari repositori.")
+except Exception as e:
+    combined_df = pd.DataFrame()
+    st.warning(f"⚠️ Gagal memuat data: {e}")
+
+...
+
+# Update mode options
+display_mode = st.radio("🗓️ Mode Tampilan", ["Daily", "Weekly", "Monthly", "Yearly"], horizontal=True)
+
+...
+
+# Add new block for Weekly
+elif display_mode == "Weekly":
+    display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("W").dt.start_time
+    display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+    display_df = display_df[
+        (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
+        (display_df["Tanggal"] <= pd.to_datetime(date_to))
+    ]
+
+...
+
+# Improve broker selection UI
+with col1:
+    unique_brokers = sorted(combined_df["Broker"].unique(), key=lambda x: x.lower())
+    default_selection = ["Total Market"] if "Total Market" in unique_brokers else []
+    selected_brokers = st.multiselect("📌 Pilih Broker", unique_brokers, default=default_selection)
