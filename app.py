@@ -83,14 +83,14 @@ def load_all_excel():
     xlsx_files = [f for f in all_files if f.endswith(".xlsx")]
 
     if not xlsx_files:
-        return pd.DataFrame(), 0
+        return pd.DataFrame(), 0, []
 
     # Sort files by date (newest first) for better user experience
     xlsx_files.sort(reverse=True)
 
     all_data = []
     failed_files = []
-    
+
     # Create progress bar
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -102,7 +102,7 @@ def load_all_excel():
             progress = (i + 1) / total_files
             progress_bar.progress(progress)
             status_text.text(f"📁 Loading {i + 1} of {total_files} files...")
-            
+
             # Extract date from filename
             match = re.search(r"(\d{8})", file)
             file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
@@ -129,28 +129,56 @@ def load_all_excel():
 
         except Exception as e:
             failed_files.append(file)
-    
-    # Clear progress indicators and show completion status
+
+    # Retry failed files once
+    if failed_files:
+        status_text.text(f"🔄 Retrying {len(failed_files)} failed files...")
+        retry_failed = []
+
+        for i, file in enumerate(failed_files):
+            try:
+                # Update progress for retry
+                progress = (len(xlsx_files) - len(failed_files) + i + 1) / len(xlsx_files)
+                progress_bar.progress(progress)
+                status_text.text(f"🔄 Retrying {i + 1} of {len(failed_files)} failed files...")
+
+                # Extract date from filename
+                match = re.search(r"(\d{8})", file)
+                file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
+
+                # Use cached download with optimized settings
+                path = hf_hub_download(
+                    REPO_ID, 
+                    filename=file, 
+                    repo_type="dataset", 
+                    token=HF_TOKEN,
+                    local_dir="./hf_cache"
+                )
+
+                # Read and process Excel file
+                df = pd.read_excel(path, sheet_name="Sheet1")
+                df.columns = df.columns.str.strip()
+
+                # Add metadata
+                df["Tanggal"] = file_date
+                df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
+                df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
+
+                all_data.append(df)
+
+            except Exception as e:
+                retry_failed.append(file)
+
+        # Update failed files list
+        failed_files = retry_failed
+
+    # Clear progress indicators
     progress_bar.empty()
-    success_count = len(all_data)
-    total_count = len(xlsx_files)
-    failed_count = len(failed_files)
-    
-    if success_count > 0:
-        status_text.success(f"✅ Successfully loaded {success_count} of {total_count} files")
-        if failed_count > 0:
-            st.warning(f"⚠️ {failed_count} files failed to load")
-    else:
-        status_text.error(f"❌ Failed to load any files (0 of {total_count})")
-        
-    # Clear status after showing for a moment
-    import time
-    time.sleep(2)
     status_text.empty()
 
     if not all_data:
         st.error("❌ No files could be loaded successfully.")
-        return pd.DataFrame(), len(xlsx_files)
+        return pd.DataFrame(), len(xlsx_files), failed_files
 
     # Combine all data efficiently
     combined = pd.concat(all_data, ignore_index=True)
@@ -175,14 +203,33 @@ def load_all_excel():
     market_df["Nama Perusahaan"] = "Total Market"
     combined = pd.concat([combined, market_df], ignore_index=True)
 
-    return combined, len(xlsx_files)
+    return combined, len(xlsx_files), failed_files
+
+# Initialize session state for file loading status
+if "file_load_status" not in st.session_state:
+    st.session_state.file_load_status = {"success": 0, "total": 0, "failed": []}
 
 with st.spinner(None):  # Disable default spinner
     try:
-        combined_df, file_count = load_all_excel()
+        combined_df, file_count, failed_files = load_all_excel()
+        st.session_state.file_load_status["total"] = file_count
+        st.session_state.file_load_status["success"] = file_count - len(failed_files)
+        st.session_state.file_load_status["failed"] = failed_files
     except Exception as e:
         combined_df = pd.DataFrame()
         st.warning(f"⚠️ Gagal memuat data: {e}")
+
+# Display permanent file loading status
+success_count = st.session_state.file_load_status["success"]
+total_count = st.session_state.file_load_status["total"]
+failed_files = st.session_state.file_load_status["failed"]
+
+if total_count > 0:
+    st.markdown("---")
+    st.markdown("##### 📁 Status Pemuatan File:")
+    st.markdown(f"✅ Berhasil dimuat: {success_count} dari {total_count} file")
+    if failed_files:
+        st.warning(f"⚠️ Gagal memuat file: {', '.join(failed_files)}")
 
 st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
 
