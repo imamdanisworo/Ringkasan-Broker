@@ -78,7 +78,10 @@ if uploaded_files:
 
 @st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour, disable spinner
 def load_all_excel():
-    """Optimized loading function with progress tracking"""
+    """Highly optimized loading function with concurrent processing"""
+    import concurrent.futures
+    from threading import Lock
+    
     all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
     xlsx_files = [f for f in all_files if f.endswith(".xlsx")]
 
@@ -90,19 +93,17 @@ def load_all_excel():
 
     all_data = []
     failed_files = []
+    lock = Lock()
 
     # Create progress bar
     progress_bar = st.progress(0)
     status_text = st.empty()
     total_files = len(xlsx_files)
+    processed_count = 0
 
-    for i, file in enumerate(xlsx_files):
+    def process_file(file):
+        """Process a single Excel file"""
         try:
-            # Update progress
-            progress = (i + 1) / total_files
-            progress_bar.progress(progress)
-            status_text.text(f"📁 Loading {i + 1} of {total_files} files...")
-
             # Extract date from filename
             match = re.search(r"(\d{8})", file)
             file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
@@ -113,63 +114,75 @@ def load_all_excel():
                 filename=file, 
                 repo_type="dataset", 
                 token=HF_TOKEN,
-                local_dir="./hf_cache"
+                local_dir="./hf_cache",
+                force_download=False  # Use cache when available
             )
 
-            # Read and process Excel file
-            df = pd.read_excel(path, sheet_name="Sheet1")
+            # Read Excel file with optimized settings
+            df = pd.read_excel(
+                path, 
+                sheet_name="Sheet1",
+                engine='openpyxl',  # Use openpyxl for better performance
+                dtype={
+                    'Kode Perusahaan': 'string',
+                    'Nama Perusahaan': 'string',
+                    'Volume': 'int64',
+                    'Nilai': 'int64',
+                    'Frekuensi': 'int64'
+                }
+            )
             df.columns = df.columns.str.strip()
 
-            # Add metadata
+            # Add metadata efficiently
             df["Tanggal"] = file_date
             df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
             df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
 
-            all_data.append(df)
+            return df, None
 
         except Exception as e:
-            failed_files.append(file)
+            return None, file
 
-    # Retry failed files once
+    # Process files concurrently with thread pool
+    max_workers = min(8, len(xlsx_files))  # Limit concurrent downloads
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_file = {executor.submit(process_file, file): file for file in xlsx_files}
+        
+        # Process completed tasks
+        for future in concurrent.futures.as_completed(future_to_file):
+            with lock:
+                processed_count += 1
+                progress = processed_count / total_files
+                progress_bar.progress(progress)
+                status_text.text(f"📁 Loading {processed_count} of {total_files} files...")
+            
+            df, failed_file = future.result()
+            
+            if df is not None:
+                with lock:
+                    all_data.append(df)
+            else:
+                with lock:
+                    failed_files.append(failed_file)
+
+    # Retry failed files once (sequential for reliability)
     if failed_files:
         status_text.text(f"🔄 Retrying {len(failed_files)} failed files...")
         retry_failed = []
 
         for i, file in enumerate(failed_files):
-            try:
-                # Update progress for retry
-                progress = (len(xlsx_files) - len(failed_files) + i + 1) / len(xlsx_files)
-                progress_bar.progress(progress)
-                status_text.text(f"🔄 Retrying {i + 1} of {len(failed_files)} failed files...")
-
-                # Extract date from filename
-                match = re.search(r"(\d{8})", file)
-                file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
-
-                # Use cached download with optimized settings
-                path = hf_hub_download(
-                    REPO_ID, 
-                    filename=file, 
-                    repo_type="dataset", 
-                    token=HF_TOKEN,
-                    local_dir="./hf_cache"
-                )
-
-                # Read and process Excel file
-                df = pd.read_excel(path, sheet_name="Sheet1")
-                df.columns = df.columns.str.strip()
-
-                # Add metadata
-                df["Tanggal"] = file_date
-                df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
-                df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
-
+            progress = (total_files - len(failed_files) + i + 1) / total_files
+            progress_bar.progress(progress)
+            status_text.text(f"🔄 Retrying {i + 1} of {len(failed_files)} failed files...")
+            
+            df, failed_file = process_file(file)
+            if df is not None:
                 all_data.append(df)
+            else:
+                retry_failed.append(failed_file)
 
-            except Exception as e:
-                retry_failed.append(file)
-
-        # Update failed files list
         failed_files = retry_failed
 
     # Clear progress indicators
@@ -180,28 +193,26 @@ def load_all_excel():
         st.error("❌ No files could be loaded successfully.")
         return pd.DataFrame(), len(xlsx_files), failed_files
 
-    # Combine all data efficiently
-    combined = pd.concat(all_data, ignore_index=True)
+    # Combine all data efficiently with optimized concat
+    combined = pd.concat(all_data, ignore_index=True, sort=False)
 
-    # Process broker names efficiently
+    # Process broker names efficiently using vectorized operations
     latest_names = (
         combined.sort_values("Tanggal")
         .drop_duplicates("Kode Perusahaan", keep="last")
         .set_index("Kode Perusahaan")["Nama Perusahaan"]
     )
-    combined["Broker"] = combined["Kode Perusahaan"].apply(
-        lambda kode: f"{kode}_{latest_names.get(kode, '')}"
-    )
+    combined["Broker"] = combined["Kode Perusahaan"].map(latest_names).fillna('') 
+    combined["Broker"] = combined["Kode Perusahaan"] + "_" + combined["Broker"]
 
-    # Add Total Market efficiently
-    market_df = (
-        combined.groupby("Tanggal")[["Volume", "Nilai", "Frekuensi"]]
-        .sum().reset_index()
-        .assign(Broker="Total Market", FieldSource="Generated")
-    )
-    market_df["Kode Perusahaan"] = "TOTAL"
-    market_df["Nama Perusahaan"] = "Total Market"
-    combined = pd.concat([combined, market_df], ignore_index=True)
+    # Add Total Market efficiently with single groupby operation
+    market_aggregated = combined.groupby("Tanggal", as_index=False)[["Volume", "Nilai", "Frekuensi"]].sum()
+    market_aggregated["Broker"] = "Total Market"
+    market_aggregated["FieldSource"] = "Generated"
+    market_aggregated["Kode Perusahaan"] = "TOTAL"
+    market_aggregated["Nama Perusahaan"] = "Total Market"
+    
+    combined = pd.concat([combined, market_aggregated], ignore_index=True, sort=False)
 
     return combined, len(xlsx_files), failed_files
 
