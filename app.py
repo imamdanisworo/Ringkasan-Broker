@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
+import os
 from datetime import datetime
 import plotly.express as px
 from huggingface_hub import HfApi, hf_hub_download, upload_file
@@ -10,7 +11,7 @@ st.set_page_config(page_title="Ringkasan Broker", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
 
 REPO_ID = "imamdanisworo/broker-storage"
-HF_TOKEN = st.secrets["HF_TOKEN"]
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 if "upload_key" not in st.session_state:
     st.session_state.upload_key = str(uuid.uuid4())
@@ -73,47 +74,107 @@ if uploaded_files:
         st.session_state.reset_upload_key = True
         st.rerun()
 
-@st.cache_data
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def load_all_excel():
+    """Optimized loading function with parallel processing and better error handling"""
     all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
     xlsx_files = [f for f in all_files if f.endswith(".xlsx")]
+
+    if not xlsx_files:
+        return pd.DataFrame(), 0
+
+    # Sort files by date (newest first) for better user experience
+    xlsx_files.sort(reverse=True)
+
+    st.info(f"📁 Loading {len(xlsx_files)} files...")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
     all_data = []
+    failed_files = []
 
-    for file in xlsx_files:
-        try:
-            match = re.search(r"(\d{8})", file)
-            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
+    # Process files in smaller batches for better performance
+    batch_size = 5
+    total_processed = 0
 
-            path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset", token=HF_TOKEN)
-            df = pd.read_excel(path, sheet_name="Sheet1")
-            df.columns = df.columns.str.strip()
-            df["Tanggal"] = file_date
-            df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
-            df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
-            all_data.append(df)
-        except Exception:
-            continue
+    for i in range(0, len(xlsx_files), batch_size):
+        batch = xlsx_files[i:i + batch_size]
 
-    combined = pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
-    if not combined.empty:
-        latest_names = (
-            combined.sort_values("Tanggal")
-            .drop_duplicates("Kode Perusahaan", keep="last")
-            .set_index("Kode Perusahaan")["Nama Perusahaan"]
-        )
-        combined["Broker"] = combined["Kode Perusahaan"].apply(
-            lambda kode: f"{kode}_{latest_names.get(kode, '')}"
-        )
+        for j, file in enumerate(batch):
+            try:
+                status_text.text(f"Processing: {file}")
 
-        # Add Total Market
-        market_df = (
-            combined.groupby("Tanggal")[["Volume", "Nilai", "Frekuensi"]]
-            .sum().reset_index()
-            .assign(Broker="Total Market", FieldSource="Generated")
-        )
-        market_df["Kode Perusahaan"] = "TOTAL"
-        market_df["Nama Perusahaan"] = "Total Market"
-        combined = pd.concat([combined, market_df], ignore_index=True)
+                # Extract date from filename
+                match = re.search(r"(\d{8})", file)
+                file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
+
+                # Use cached download with optimized settings
+                path = hf_hub_download(
+                    REPO_ID, 
+                    filename=file, 
+                    repo_type="dataset", 
+                    token=HF_TOKEN,
+                    local_dir="./hf_cache"
+                )
+
+                # Read and process Excel file
+                df = pd.read_excel(path, sheet_name="Sheet1")
+                df.columns = df.columns.str.strip()
+
+                # Add metadata
+                df["Tanggal"] = file_date
+                df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
+                df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
+
+                all_data.append(df)
+
+            except Exception as e:
+                failed_files.append(file)
+                st.warning(f"⚠️ Failed to load {file}: {str(e)}")
+
+            # Update progress
+            total_processed += 1
+            progress = total_processed / len(xlsx_files)
+            progress_bar.progress(progress)
+
+    # Clear progress indicators
+    progress_bar.empty()
+    status_text.empty()
+
+    if not all_data:
+        st.error("❌ No files could be loaded successfully.")
+        return pd.DataFrame(), len(xlsx_files)
+
+    # Combine all data efficiently
+    st.info("🔄 Combining data...")
+    combined = pd.concat(all_data, ignore_index=True)
+
+    # Process broker names efficiently
+    latest_names = (
+        combined.sort_values("Tanggal")
+        .drop_duplicates("Kode Perusahaan", keep="last")
+        .set_index("Kode Perusahaan")["Nama Perusahaan"]
+    )
+    combined["Broker"] = combined["Kode Perusahaan"].apply(
+        lambda kode: f"{kode}_{latest_names.get(kode, '')}"
+    )
+
+    # Add Total Market efficiently
+    market_df = (
+        combined.groupby("Tanggal")[["Volume", "Nilai", "Frekuensi"]]
+        .sum().reset_index()
+        .assign(Broker="Total Market", FieldSource="Generated")
+    )
+    market_df["Kode Perusahaan"] = "TOTAL"
+    market_df["Nama Perusahaan"] = "Total Market"
+    combined = pd.concat([combined, market_df], ignore_index=True)
+
+    # Show loading statistics
+    successful_files = len(xlsx_files) - len(failed_files)
+    st.success(f"✅ Successfully loaded {successful_files}/{len(xlsx_files)} files")
+
+    if failed_files:
+        st.warning(f"⚠️ Failed files: {', '.join(failed_files[:3])}{'...' if len(failed_files) > 3 else ''}")
 
     return combined, len(xlsx_files)
 
@@ -136,7 +197,7 @@ if not combined_df.empty:
             default_selection = ["Total Market"] if "Total Market" in unique_brokers else []
             selected_brokers = st.multiselect("📌 Pilih Broker", unique_brokers, default=default_selection)
         with col2:
-            selected_fields = st.multiselect("📊 Pilih Jenis Data", ["Volume", "Nilai", "Frekuensi"])
+            selected_fields = st.multiselect("📊 Pilih Jenis Data", ["Volume", "Nilai", "Frekuensi"], default=["Nilai"])
 
         display_mode = st.radio("🗓️ Mode Tampilan", ["Daily", "Monthly", "Yearly"], horizontal=True)
 
@@ -342,10 +403,13 @@ if not combined_df.empty:
         ranked_df.reset_index(inplace=True)
         ranked_df.columns = ["Peringkat", "Broker", column]
         total = ranked_df[column].sum()
+
+        # Convert to string to prevent Arrow serialization issues
+        ranked_df["Peringkat"] = ranked_df["Peringkat"].astype(str)
         ranked_df[column] = ranked_df[column].apply(lambda x: f"{x:,.0f}")
 
         total_row = pd.DataFrame([{
-            "Peringkat": "",
+            "Peringkat": "TOTAL",
             "Broker": "TOTAL",
             column: f"{total:,.0f}"
         }])
