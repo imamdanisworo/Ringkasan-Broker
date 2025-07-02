@@ -74,9 +74,9 @@ if uploaded_files:
         st.session_state.reset_upload_key = True
         st.rerun()
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour, disable spinner
 def load_all_excel():
-    """Optimized loading function with parallel processing and better error handling"""
+    """Optimized loading function with progress tracking"""
     all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
     xlsx_files = [f for f in all_files if f.endswith(".xlsx")]
 
@@ -86,57 +86,48 @@ def load_all_excel():
     # Sort files by date (newest first) for better user experience
     xlsx_files.sort(reverse=True)
 
-    st.info(f"📁 Loading {len(xlsx_files)} files...")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
     all_data = []
     failed_files = []
+    
+    # Create progress bar
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    total_files = len(xlsx_files)
 
-    # Process files in smaller batches for better performance
-    batch_size = 5
-    total_processed = 0
-
-    for i in range(0, len(xlsx_files), batch_size):
-        batch = xlsx_files[i:i + batch_size]
-
-        for j, file in enumerate(batch):
-            try:
-                status_text.text(f"Processing: {file}")
-
-                # Extract date from filename
-                match = re.search(r"(\d{8})", file)
-                file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
-
-                # Use cached download with optimized settings
-                path = hf_hub_download(
-                    REPO_ID, 
-                    filename=file, 
-                    repo_type="dataset", 
-                    token=HF_TOKEN,
-                    local_dir="./hf_cache"
-                )
-
-                # Read and process Excel file
-                df = pd.read_excel(path, sheet_name="Sheet1")
-                df.columns = df.columns.str.strip()
-
-                # Add metadata
-                df["Tanggal"] = file_date
-                df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
-                df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
-
-                all_data.append(df)
-
-            except Exception as e:
-                failed_files.append(file)
-                st.warning(f"⚠️ Failed to load {file}: {str(e)}")
-
+    for i, file in enumerate(xlsx_files):
+        try:
             # Update progress
-            total_processed += 1
-            progress = total_processed / len(xlsx_files)
+            progress = (i + 1) / total_files
             progress_bar.progress(progress)
+            status_text.text(f"📁 Loading {i + 1} of {total_files} files...")
+            
+            # Extract date from filename
+            match = re.search(r"(\d{8})", file)
+            file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
 
+            # Use cached download with optimized settings
+            path = hf_hub_download(
+                REPO_ID, 
+                filename=file, 
+                repo_type="dataset", 
+                token=HF_TOKEN,
+                local_dir="./hf_cache"
+            )
+
+            # Read and process Excel file
+            df = pd.read_excel(path, sheet_name="Sheet1")
+            df.columns = df.columns.str.strip()
+
+            # Add metadata
+            df["Tanggal"] = file_date
+            df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
+            df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
+
+            all_data.append(df)
+
+        except Exception as e:
+            failed_files.append(file)
+    
     # Clear progress indicators
     progress_bar.empty()
     status_text.empty()
@@ -146,7 +137,6 @@ def load_all_excel():
         return pd.DataFrame(), len(xlsx_files)
 
     # Combine all data efficiently
-    st.info("🔄 Combining data...")
     combined = pd.concat(all_data, ignore_index=True)
 
     # Process broker names efficiently
@@ -169,21 +159,14 @@ def load_all_excel():
     market_df["Nama Perusahaan"] = "Total Market"
     combined = pd.concat([combined, market_df], ignore_index=True)
 
-    # Show loading statistics
-    successful_files = len(xlsx_files) - len(failed_files)
-    st.success(f"✅ Successfully loaded {successful_files}/{len(xlsx_files)} files")
-
-    if failed_files:
-        st.warning(f"⚠️ Failed files: {', '.join(failed_files[:3])}{'...' if len(failed_files) > 3 else ''}")
-
     return combined, len(xlsx_files)
 
-try:
-    combined_df, file_count = load_all_excel()
-    st.info(f"📂 {file_count} file Excel dimuat dari repositori.")
-except Exception as e:
-    combined_df = pd.DataFrame()
-    st.warning(f"⚠️ Gagal memuat data: {e}")
+with st.spinner(None):  # Disable default spinner
+    try:
+        combined_df, file_count = load_all_excel()
+    except Exception as e:
+        combined_df = pd.DataFrame()
+        st.warning(f"⚠️ Gagal memuat data: {e}")
 
 st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
 
