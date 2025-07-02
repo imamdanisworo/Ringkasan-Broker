@@ -72,6 +72,8 @@ if uploaded_files:
 
     if upload_success:
         st.session_state.reset_upload_key = True
+        # Clear the cache to reload data with new files
+        st.cache_data.clear()
         st.rerun()
 
 @st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour, disable spinner
@@ -128,8 +130,22 @@ def load_all_excel():
         except Exception as e:
             failed_files.append(file)
     
-    # Clear progress indicators
+    # Clear progress indicators and show completion status
     progress_bar.empty()
+    success_count = len(all_data)
+    total_count = len(xlsx_files)
+    failed_count = len(failed_files)
+    
+    if success_count > 0:
+        status_text.success(f"✅ Successfully loaded {success_count} of {total_count} files")
+        if failed_count > 0:
+            st.warning(f"⚠️ {failed_count} files failed to load")
+    else:
+        status_text.error(f"❌ Failed to load any files (0 of {total_count})")
+        
+    # Clear status after showing for a moment
+    import time
+    time.sleep(2)
     status_text.empty()
 
     if not all_data:
