@@ -307,8 +307,10 @@ if not combined_df.empty:
             melted_df = filtered_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
                                          var_name="Field", value_name="Value")
 
-            # ✅ FIX: Exclude "Total Market" from total denominator
-            total_df = combined_df[combined_df["Broker"] != "Total Market"].melt(
+            # ✅ FIX: Exclude "Total Market" from total denominator for percentage calculation
+            # Only calculate percentages for non-Total Market brokers
+            non_total_df = combined_df[combined_df["Broker"] != "Total Market"]
+            total_df = non_total_df.melt(
                 id_vars=["Tanggal", "Broker"],
                 value_vars=selected_fields,
                 var_name="Field",
@@ -317,22 +319,46 @@ if not combined_df.empty:
             total_df = total_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
             total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
 
-            merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"])
+            merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"], how="left")
+            # For Total Market entries, percentage should be 100% or calculated differently
             merged_df["Percentage"] = merged_df.apply(
-                lambda row: (row["Value"] / row["TotalValue"] * 100) if row["TotalValue"] != 0 else 0, axis=1)
+                lambda row: (row["Value"] / row["TotalValue"] * 100) if pd.notna(row["TotalValue"]) and row["TotalValue"] != 0 
+                else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
 
             display_df = merged_df.copy()
 
             if display_mode == "Monthly":
                 display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
-                display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                # Aggregate values first
+                monthly_df = display_df.groupby(["Tanggal", "Broker", "Field"])["Value"].sum().reset_index()
+                
+                # Recalculate percentages for monthly aggregated data
+                monthly_total = monthly_df[monthly_df["Broker"] != "Total Market"].groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
+                monthly_total.rename(columns={"Value": "TotalValue"}, inplace=True)
+                
+                display_df = pd.merge(monthly_df, monthly_total, on=["Tanggal", "Field"], how="left")
+                display_df["Percentage"] = display_df.apply(
+                    lambda row: (row["Value"] / row["TotalValue"] * 100) if pd.notna(row["TotalValue"]) and row["TotalValue"] != 0 
+                    else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
+                
                 display_df = display_df[
                     (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
                     (display_df["Tanggal"] <= pd.to_datetime(date_to))
                 ]
             elif display_mode == "Yearly":
                 display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("Y").dt.to_timestamp()
-                display_df = display_df.groupby(["Tanggal", "Broker", "Field"]).agg({"Value": "sum", "Percentage": "mean"}).reset_index()
+                # Aggregate values first
+                yearly_df = display_df.groupby(["Tanggal", "Broker", "Field"])["Value"].sum().reset_index()
+                
+                # Recalculate percentages for yearly aggregated data
+                yearly_total = yearly_df[yearly_df["Broker"] != "Total Market"].groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
+                yearly_total.rename(columns={"Value": "TotalValue"}, inplace=True)
+                
+                display_df = pd.merge(yearly_df, yearly_total, on=["Tanggal", "Field"], how="left")
+                display_df["Percentage"] = display_df.apply(
+                    lambda row: (row["Value"] / row["TotalValue"] * 100) if pd.notna(row["TotalValue"]) and row["TotalValue"] != 0 
+                    else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
+                
                 display_df = display_df[
                     (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
                     (display_df["Tanggal"] <= pd.to_datetime(date_to))
@@ -361,7 +387,13 @@ if not combined_df.empty:
 
             with tab1:
                 for field in selected_fields:
+                    # Use the same processed data that's shown in the table
                     chart_data = display_df[display_df["Field"] == field].copy()
+                    
+                    # Sort by date to ensure proper line connections
+                    chart_data = chart_data.sort_values("Tanggal")
+                    
+                    # Create the base line chart
                     fig = px.line(
                         chart_data,
                         x="Tanggal",
@@ -370,15 +402,82 @@ if not combined_df.empty:
                         title=f"{field} dari waktu ke waktu",
                         markers=True
                     )
+                    
+                    # Function to format values for hover display
+                    def format_hover_value(value):
+                        if value >= 1_000_000_000_000:  # Trillion
+                            return f"{value / 1_000_000_000_000:.4f}T"
+                        elif value >= 1_000_000_000:  # Billion
+                            return f"{value / 1_000_000_000:.4f}B"
+                        else:
+                            return f"{value:,.0f}"
+                    
+                    # Update all traces to have blue lines and markers with proper hover
+                    for i, trace in enumerate(fig.data):
+                        broker_name = trace.name
+                        # Create custom hover text for each point
+                        hover_texts = [f"<b>{broker_name}</b><br>Tanggal: {date}<br>{field}: {format_hover_value(value)}" 
+                                      for date, value in zip(chart_data[chart_data["Broker"] == broker_name]["Tanggal"].dt.strftime('%Y-%m-%d'), 
+                                                           chart_data[chart_data["Broker"] == broker_name]["Value"])]
+                        trace.update(
+                            line=dict(color="blue"),
+                            marker=dict(color="blue", size=6),
+                            hovertemplate="%{text}<extra></extra>",
+                            text=hover_texts
+                        )
+                    
+                    # Add color coding for min/max values for each broker
+                    for broker in chart_data["Broker"].unique():
+                        broker_data = chart_data[chart_data["Broker"] == broker].copy()
+                        if len(broker_data) > 1:  # Only add min/max if there's more than one point
+                            min_idx = broker_data["Value"].idxmin()
+                            max_idx = broker_data["Value"].idxmax()
+                            
+                            min_date = broker_data.loc[min_idx, "Tanggal"]
+                            min_value = broker_data.loc[min_idx, "Value"]
+                            max_date = broker_data.loc[max_idx, "Tanggal"]
+                            max_value = broker_data.loc[max_idx, "Value"]
+                            
+                            # Add red dot for minimum value
+                            min_formatted = format_hover_value(min_value)
+                            fig.add_scatter(
+                                x=[min_date],
+                                y=[min_value],
+                                mode="markers",
+                                marker=dict(color="red", size=6, symbol="circle"),
+                                name=f"{broker} (Min)",
+                                showlegend=False,
+                                hovertemplate=f"<b>{broker}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Nilai Terendah: {min_formatted}<extra></extra>"
+                            )
+                            
+                            # Add green dot for maximum value
+                            max_formatted = format_hover_value(max_value)
+                            fig.add_scatter(
+                                x=[max_date],
+                                y=[max_value],
+                                mode="markers",
+                                marker=dict(color="green", size=6, symbol="circle"),
+                                name=f"{broker} (Max)",
+                                showlegend=False,
+                                hovertemplate=f"<b>{broker}</b><br>Tanggal: {max_date.strftime('%Y-%m-%d')}<br>Nilai Tertinggi: {max_formatted}<extra></extra>"
+                            )
+                    
                     fig.update_layout(
                         xaxis_title="Tanggal",
-                        hovermode="x unified"
+                        yaxis_title=field,
+                        hovermode="closest"
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
             with tab2:
                 for field in selected_fields:
+                    # Use the same processed data that's shown in the table
                     chart_data = display_df[display_df["Field"] == field].copy()
+                    
+                    # Sort by date to ensure proper line connections
+                    chart_data = chart_data.sort_values("Tanggal")
+                    
+                    # Create the base line chart
                     fig = px.line(
                         chart_data,
                         x="Tanggal",
@@ -387,9 +486,54 @@ if not combined_df.empty:
                         title=f"Kontribusi {field} (%) dari waktu ke waktu",
                         markers=True
                     )
+                    
+                    # Update all traces to have blue lines and markers with proper hover
+                    for i, trace in enumerate(fig.data):
+                        broker_name = trace.name
+                        trace.update(
+                            line=dict(color="blue"),
+                            marker=dict(color="blue", size=6),
+                            hovertemplate=f"<b>{broker_name}</b><br>Tanggal: %{{x}}<br>Kontribusi: %{{y:.2f}}%<extra></extra>"
+                        )
+                    
+                    # Add color coding for min/max values for each broker
+                    for broker in chart_data["Broker"].unique():
+                        broker_data = chart_data[chart_data["Broker"] == broker].copy()
+                        if len(broker_data) > 1:  # Only add min/max if there's more than one point
+                            min_idx = broker_data["Percentage"].idxmin()
+                            max_idx = broker_data["Percentage"].idxmax()
+                            
+                            min_date = broker_data.loc[min_idx, "Tanggal"]
+                            min_percentage = broker_data.loc[min_idx, "Percentage"]
+                            max_date = broker_data.loc[max_idx, "Tanggal"]
+                            max_percentage = broker_data.loc[max_idx, "Percentage"]
+                            
+                            # Add red dot for minimum percentage
+                            fig.add_scatter(
+                                x=[min_date],
+                                y=[min_percentage],
+                                mode="markers",
+                                marker=dict(color="red", size=6, symbol="circle"),
+                                name=f"{broker} (Min %)",
+                                showlegend=False,
+                                hovertemplate=f"<b>{broker}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Kontribusi Terendah: {min_percentage:.2f}%<extra></extra>"
+                            )
+                            
+                            # Add green dot for maximum percentage
+                            fig.add_scatter(
+                                x=[max_date],
+                                y=[max_percentage],
+                                mode="markers",
+                                marker=dict(color="green", size=6, symbol="circle"),
+                                name=f"{broker} (Max %)",
+                                showlegend=False,
+                                hovertemplate=f"<b>{broker}</b><br>Tanggal: {max_date.strftime('%Y-%m-%d')}<br>Kontribusi Tertinggi: {max_percentage:.2f}%<extra></extra>"
+                            )
+                    
                     fig.update_layout(
                         xaxis_title="Tanggal",
-                        hovermode="x unified"
+                        yaxis_title="Percentage (%)",
+                        hovermode="closest"
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
