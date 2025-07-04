@@ -412,7 +412,7 @@ if not combined_df.empty:
                         else:
                             return f"{value:,.0f}"
                     
-                    # Update all traces to have blue lines and markers with proper hover
+                    # Update all traces with proper hover (let Plotly handle colors automatically)
                     for i, trace in enumerate(fig.data):
                         broker_name = trace.name
                         # Create custom hover text for each point
@@ -420,8 +420,7 @@ if not combined_df.empty:
                                       for date, value in zip(chart_data[chart_data["Broker"] == broker_name]["Tanggal"].dt.strftime('%Y-%m-%d'), 
                                                            chart_data[chart_data["Broker"] == broker_name]["Value"])]
                         trace.update(
-                            line=dict(color="blue"),
-                            marker=dict(color="blue", size=6),
+                            marker=dict(size=6),
                             hovertemplate="%{text}<extra></extra>",
                             text=hover_texts
                         )
@@ -487,12 +486,11 @@ if not combined_df.empty:
                         markers=True
                     )
                     
-                    # Update all traces to have blue lines and markers with proper hover
+                    # Update all traces with proper hover (let Plotly handle colors automatically)
                     for i, trace in enumerate(fig.data):
                         broker_name = trace.name
                         trace.update(
-                            line=dict(color="blue"),
-                            marker=dict(color="blue", size=6),
+                            marker=dict(size=6),
                             hovertemplate=f"<b>{broker_name}</b><br>Tanggal: %{{x}}<br>Kontribusi: %{{y:.2f}}%<extra></extra>"
                         )
                     
