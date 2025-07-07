@@ -419,14 +419,18 @@ if not combined_df.empty:
                     # Sort by date to ensure proper line connections
                     chart_data = chart_data.sort_values("Tanggal")
                     
-                    # Create the base line chart
+                    # Create the base line chart with custom color palette (avoiding red/green)
+                    custom_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+                    broker_colors = ['#1f77b4', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#aec7e8', '#ffbb78']
+                    
                     fig = px.line(
                         chart_data,
                         x="Tanggal",
                         y="Value",
                         color="Broker",
                         title=f"{field} dari waktu ke waktu",
-                        markers=True
+                        markers=True,
+                        color_discrete_sequence=broker_colors
                     )
                     
                     # Function to format values for hover display
@@ -502,14 +506,17 @@ if not combined_df.empty:
                     # Sort by date to ensure proper line connections
                     chart_data = chart_data.sort_values("Tanggal")
                     
-                    # Create the base line chart
+                    # Create the base line chart with custom color palette (avoiding red/green)
+                    broker_colors = ['#1f77b4', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#aec7e8', '#ffbb78']
+                    
                     fig = px.line(
                         chart_data,
                         x="Tanggal",
                         y="Percentage",
                         color="Broker",
                         title=f"Kontribusi {field} (%) dari waktu ke waktu",
-                        markers=True
+                        markers=True,
+                        color_discrete_sequence=broker_colors
                     )
                     
                     # Update all traces with proper hover (let Plotly handle colors automatically)
