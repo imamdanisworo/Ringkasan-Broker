@@ -307,23 +307,21 @@ if not combined_df.empty:
             melted_df = filtered_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
                                          var_name="Field", value_name="Value")
 
-            # ✅ FIX: Exclude "Total Market" from total denominator for percentage calculation
-            # Only calculate percentages for non-Total Market brokers
-            non_total_df = combined_df[combined_df["Broker"] != "Total Market"]
-            total_df = non_total_df.melt(
+            # ✅ FIX: Use Total Market values as denominator for percentage calculation
+            # Get Total Market values for each date and field
+            total_market_df = combined_df[combined_df["Broker"] == "Total Market"].melt(
                 id_vars=["Tanggal", "Broker"],
                 value_vars=selected_fields,
                 var_name="Field",
-                value_name="Value"
+                value_name="TotalMarketValue"
             )
-            total_df = total_df.groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
-            total_df.rename(columns={"Value": "TotalValue"}, inplace=True)
+            total_market_df = total_market_df[["Tanggal", "Field", "TotalMarketValue"]]
 
-            merged_df = pd.merge(melted_df, total_df, on=["Tanggal", "Field"], how="left")
-            # For Total Market entries, percentage should be 100% or calculated differently
+            merged_df = pd.merge(melted_df, total_market_df, on=["Tanggal", "Field"], how="left")
+            # Calculate percentage: (Broker Value / Total Market Value) × 100
             merged_df["Percentage"] = merged_df.apply(
-                lambda row: (row["Value"] / row["TotalValue"] * 100) if pd.notna(row["TotalValue"]) and row["TotalValue"] != 0 
-                else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
+                lambda row: (row["Value"] / row["TotalMarketValue"] * 100) if pd.notna(row["TotalMarketValue"]) and row["TotalMarketValue"] != 0 
+                else 0.0, axis=1)
 
             display_df = merged_df.copy()
 
@@ -332,13 +330,27 @@ if not combined_df.empty:
                 # Aggregate values first
                 monthly_df = display_df.groupby(["Tanggal", "Broker", "Field"])["Value"].sum().reset_index()
                 
-                # Recalculate percentages for monthly aggregated data
-                monthly_total = monthly_df[monthly_df["Broker"] != "Total Market"].groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
-                monthly_total.rename(columns={"Value": "TotalValue"}, inplace=True)
+                # Get the complete market totals from the original data (not just selected brokers)
+                monthly_market_totals = combined_df[
+                    (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
+                    (combined_df["Tanggal"] <= pd.to_datetime(date_to))
+                ].copy()
+                monthly_market_totals["Tanggal"] = monthly_market_totals["Tanggal"].dt.to_period("M").dt.to_timestamp()
                 
-                display_df = pd.merge(monthly_df, monthly_total, on=["Tanggal", "Field"], how="left")
+                # Get Total Market values for each month/field
+                monthly_market_melted = monthly_market_totals[monthly_market_totals["Broker"] == "Total Market"].melt(
+                    id_vars=["Tanggal", "Broker"],
+                    value_vars=selected_fields,
+                    var_name="Field",
+                    value_name="MarketTotal"
+                )
+                monthly_market_aggregated = monthly_market_melted.groupby(["Tanggal", "Field"])["MarketTotal"].sum().reset_index()
+                
+                display_df = pd.merge(monthly_df, monthly_market_aggregated, on=["Tanggal", "Field"], how="left")
+                
+                # Calculate percentage: (Broker Value / Total Market Value) × 100
                 display_df["Percentage"] = display_df.apply(
-                    lambda row: (row["Value"] / row["TotalValue"] * 100) if pd.notna(row["TotalValue"]) and row["TotalValue"] != 0 
+                    lambda row: (row["Value"] / row["MarketTotal"] * 100) if pd.notna(row["MarketTotal"]) and row["MarketTotal"] != 0 and row["Broker"] != "Total Market"
                     else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
                 
                 display_df = display_df[
@@ -350,13 +362,27 @@ if not combined_df.empty:
                 # Aggregate values first
                 yearly_df = display_df.groupby(["Tanggal", "Broker", "Field"])["Value"].sum().reset_index()
                 
-                # Recalculate percentages for yearly aggregated data
-                yearly_total = yearly_df[yearly_df["Broker"] != "Total Market"].groupby(["Tanggal", "Field"])["Value"].sum().reset_index()
-                yearly_total.rename(columns={"Value": "TotalValue"}, inplace=True)
+                # Get the complete market totals from the original data (not just selected brokers)
+                yearly_market_totals = combined_df[
+                    (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
+                    (combined_df["Tanggal"] <= pd.to_datetime(date_to))
+                ].copy()
+                yearly_market_totals["Tanggal"] = yearly_market_totals["Tanggal"].dt.to_period("Y").dt.to_timestamp()
                 
-                display_df = pd.merge(yearly_df, yearly_total, on=["Tanggal", "Field"], how="left")
+                # Get Total Market values for each year/field
+                yearly_market_melted = yearly_market_totals[yearly_market_totals["Broker"] == "Total Market"].melt(
+                    id_vars=["Tanggal", "Broker"],
+                    value_vars=selected_fields,
+                    var_name="Field",
+                    value_name="MarketTotal"
+                )
+                yearly_market_aggregated = yearly_market_melted.groupby(["Tanggal", "Field"])["MarketTotal"].sum().reset_index()
+                
+                display_df = pd.merge(yearly_df, yearly_market_aggregated, on=["Tanggal", "Field"], how="left")
+                
+                # Calculate percentage: (Broker Value / Total Market Value) × 100
                 display_df["Percentage"] = display_df.apply(
-                    lambda row: (row["Value"] / row["TotalValue"] * 100) if pd.notna(row["TotalValue"]) and row["TotalValue"] != 0 
+                    lambda row: (row["Value"] / row["MarketTotal"] * 100) if pd.notna(row["MarketTotal"]) and row["MarketTotal"] != 0 and row["Broker"] != "Total Market"
                     else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
                 
                 display_df = display_df[
