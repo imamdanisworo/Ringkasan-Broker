@@ -397,7 +397,23 @@ if not combined_df.empty:
             display_df_for_table["Tanggal Display"] = display_df["Tanggal"].dt.strftime(
                 '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
             )
-            display_df_for_table = display_df_for_table.sort_values("Tanggal")
+            
+            # Create a sorting key: Total Market = 0, other brokers = 1
+            display_df_for_table["Sort_Priority"] = display_df_for_table["Broker"].apply(
+                lambda x: 0 if x == "Total Market" else 1
+            )
+            
+            # Sort by date first (oldest first), then by priority (Total Market first), then by broker name
+            display_df_for_table = display_df_for_table.sort_values(
+                ["Tanggal", "Sort_Priority", "Broker"]
+            )
+            
+            # Remove the temporary sorting column
+            display_df_for_table = display_df_for_table.drop("Sort_Priority", axis=1)
+            
+            # Reset index and create sequential numbering starting from 1
+            display_df_for_table = display_df_for_table.reset_index(drop=True)
+            display_df_for_table.index = display_df_for_table.index + 1
 
             st.dataframe(
                 display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
@@ -631,13 +647,13 @@ if not combined_df.empty:
             .sort_values(ascending=False)
             .reset_index()
         )
-        ranked_df.index += 1
-        ranked_df.reset_index(inplace=True)
-        ranked_df.columns = ["Peringkat", "Broker", column]
+        
+        # Create sequential ranking starting from 1
+        ranked_df["Peringkat"] = range(1, len(ranked_df) + 1)
+        ranked_df = ranked_df[["Peringkat", "Broker", column]]
         total = ranked_df[column].sum()
 
-        # Convert to string to prevent Arrow serialization issues
-        ranked_df["Peringkat"] = ranked_df["Peringkat"].astype(str)
+        # Format the values for display
         ranked_df[column] = ranked_df[column].apply(lambda x: f"{x:,.0f}")
 
         total_row = pd.DataFrame([{
