@@ -242,7 +242,18 @@ if total_count > 0:
     if failed_files:
         st.warning(f"⚠️ Gagal memuat file: {', '.join(failed_files)}")
 
-st.button("🔁 Refresh Data", on_click=lambda: (st.cache_data.clear(), st.rerun()))
+# Add refresh trigger to session state
+if "refresh_trigger" not in st.session_state:
+    st.session_state.refresh_trigger = False
+
+if st.button("🔁 Refresh Data"):
+    st.cache_data.clear()
+    st.session_state.refresh_trigger = True
+    st.rerun()
+
+# Reset refresh trigger after rerun
+if st.session_state.refresh_trigger:
+    st.session_state.refresh_trigger = False
 
 if not combined_df.empty:
     combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
