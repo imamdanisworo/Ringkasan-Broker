@@ -479,7 +479,8 @@ if not combined_df.empty:
                         trace.update(
                             marker=dict(size=6),
                             hovertemplate="%{text}<extra></extra>",
-                            text=hover_texts
+                            text=hover_texts,
+                            legendgroup=broker_name
                         )
                     
                     # Add color coding for min/max values for each broker
@@ -503,6 +504,7 @@ if not combined_df.empty:
                                 marker=dict(color="red", size=6, symbol="circle"),
                                 name=f"{broker} (Min)",
                                 showlegend=False,
+                                legendgroup=broker,
                                 hovertemplate=f"<b>{broker}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Nilai Terendah: {min_formatted}<extra></extra>"
                             )
                             
@@ -515,6 +517,7 @@ if not combined_df.empty:
                                 marker=dict(color="green", size=6, symbol="circle"),
                                 name=f"{broker} (Max)",
                                 showlegend=False,
+                                legendgroup=broker,
                                 hovertemplate=f"<b>{broker}</b><br>Tanggal: {max_date.strftime('%Y-%m-%d')}<br>Nilai Tertinggi: {max_formatted}<extra></extra>"
                             )
                     
@@ -551,7 +554,8 @@ if not combined_df.empty:
                         broker_name = trace.name
                         trace.update(
                             marker=dict(size=6),
-                            hovertemplate=f"<b>{broker_name}</b><br>Tanggal: %{{x}}<br>Kontribusi: %{{y:.2f}}%<extra></extra>"
+                            hovertemplate=f"<b>{broker_name}</b><br>Tanggal: %{{x}}<br>Kontribusi: %{{y:.2f}}%<extra></extra>",
+                            legendgroup=broker_name
                         )
                     
                     # Add color coding for min/max values for each broker
@@ -574,6 +578,7 @@ if not combined_df.empty:
                                 marker=dict(color="red", size=6, symbol="circle"),
                                 name=f"{broker} (Min %)",
                                 showlegend=False,
+                                legendgroup=broker,
                                 hovertemplate=f"<b>{broker}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Kontribusi Terendah: {min_percentage:.2f}%<extra></extra>"
                             )
                             
@@ -585,6 +590,7 @@ if not combined_df.empty:
                                 marker=dict(color="green", size=6, symbol="circle"),
                                 name=f"{broker} (Max %)",
                                 showlegend=False,
+                                legendgroup=broker,
                                 hovertemplate=f"<b>{broker}</b><br>Tanggal: {max_date.strftime('%Y-%m-%d')}<br>Kontribusi Tertinggi: {max_percentage:.2f}%<extra></extra>"
                             )
                     
