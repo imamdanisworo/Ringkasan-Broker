@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import re
@@ -72,11 +73,10 @@ if uploaded_files:
 
     if upload_success:
         st.session_state.reset_upload_key = True
-        # Clear the cache to reload data with new files
         st.cache_data.clear()
         st.rerun()
 
-@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour, disable spinner
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_all_excel():
     """Highly optimized loading function with concurrent processing"""
     import concurrent.futures
@@ -88,14 +88,12 @@ def load_all_excel():
     if not xlsx_files:
         return pd.DataFrame(), 0, []
 
-    # Sort files by date (newest first) for better user experience
     xlsx_files.sort(reverse=True)
 
     all_data = []
     failed_files = []
     lock = Lock()
 
-    # Create progress bar
     progress_bar = st.progress(0)
     status_text = st.empty()
     total_files = len(xlsx_files)
@@ -104,25 +102,22 @@ def load_all_excel():
     def process_file(file):
         """Process a single Excel file"""
         try:
-            # Extract date from filename
             match = re.search(r"(\d{8})", file)
             file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
 
-            # Use cached download with optimized settings
             path = hf_hub_download(
                 REPO_ID, 
                 filename=file, 
                 repo_type="dataset", 
                 token=HF_TOKEN,
                 local_dir="./hf_cache",
-                force_download=False  # Use cache when available
+                force_download=False
             )
 
-            # Read Excel file with optimized settings
             df = pd.read_excel(
                 path, 
                 sheet_name="Sheet1",
-                engine='openpyxl',  # Use openpyxl for better performance
+                engine='openpyxl',
                 dtype={
                     'Kode Perusahaan': 'string',
                     'Nama Perusahaan': 'string',
@@ -133,7 +128,6 @@ def load_all_excel():
             )
             df.columns = df.columns.str.strip()
 
-            # Add metadata efficiently
             df["Tanggal"] = file_date
             df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
             df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
@@ -143,14 +137,11 @@ def load_all_excel():
         except Exception as e:
             return None, file
 
-    # Process files concurrently with thread pool
-    max_workers = min(8, len(xlsx_files))  # Limit concurrent downloads
+    max_workers = min(8, len(xlsx_files))
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
         future_to_file = {executor.submit(process_file, file): file for file in xlsx_files}
         
-        # Process completed tasks
         for future in concurrent.futures.as_completed(future_to_file):
             with lock:
                 processed_count += 1
@@ -167,7 +158,7 @@ def load_all_excel():
                 with lock:
                     failed_files.append(failed_file)
 
-    # Retry failed files once (sequential for reliability)
+    # Retry failed files once
     if failed_files:
         status_text.text(f"🔄 Retrying {len(failed_files)} failed files...")
         retry_failed = []
@@ -185,7 +176,6 @@ def load_all_excel():
 
         failed_files = retry_failed
 
-    # Clear progress indicators
     progress_bar.empty()
     status_text.empty()
 
@@ -193,10 +183,8 @@ def load_all_excel():
         st.error("❌ No files could be loaded successfully.")
         return pd.DataFrame(), len(xlsx_files), failed_files
 
-    # Combine all data efficiently with optimized concat
     combined = pd.concat(all_data, ignore_index=True, sort=False)
 
-    # Process broker names efficiently using vectorized operations
     latest_names = (
         combined.sort_values("Tanggal")
         .drop_duplicates("Kode Perusahaan", keep="last")
@@ -205,7 +193,6 @@ def load_all_excel():
     combined["Broker"] = combined["Kode Perusahaan"].map(latest_names).fillna('') 
     combined["Broker"] = combined["Kode Perusahaan"] + "_" + combined["Broker"]
 
-    # Add Total Market efficiently with single groupby operation
     market_aggregated = combined.groupby("Tanggal", as_index=False)[["Volume", "Nilai", "Frekuensi"]].sum()
     market_aggregated["Broker"] = "Total Market"
     market_aggregated["FieldSource"] = "Generated"
@@ -220,7 +207,7 @@ def load_all_excel():
 if "file_load_status" not in st.session_state:
     st.session_state.file_load_status = {"success": 0, "total": 0, "failed": []}
 
-with st.spinner(None):  # Disable default spinner
+with st.spinner(None):
     try:
         combined_df, file_count, failed_files = load_all_excel()
         st.session_state.file_load_status["total"] = file_count
@@ -230,7 +217,7 @@ with st.spinner(None):  # Disable default spinner
         combined_df = pd.DataFrame()
         st.warning(f"⚠️ Gagal memuat data: {e}")
 
-# Display permanent file loading status
+# Display file loading status
 success_count = st.session_state.file_load_status["success"]
 total_count = st.session_state.file_load_status["total"]
 failed_files = st.session_state.file_load_status["failed"]
@@ -242,7 +229,6 @@ if total_count > 0:
     if failed_files:
         st.warning(f"⚠️ Gagal memuat file: {', '.join(failed_files)}")
 
-# Add refresh trigger to session state
 if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
 
@@ -251,7 +237,6 @@ if st.button("🔁 Refresh Data"):
     st.session_state.refresh_trigger = True
     st.rerun()
 
-# Reset refresh trigger after rerun
 if st.session_state.refresh_trigger:
     st.session_state.refresh_trigger = False
 
@@ -318,8 +303,6 @@ if not combined_df.empty:
             melted_df = filtered_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
                                          var_name="Field", value_name="Value")
 
-            # ✅ FIX: Use Total Market values as denominator for percentage calculation
-            # Get Total Market values for each date and field
             total_market_df = combined_df[combined_df["Broker"] == "Total Market"].melt(
                 id_vars=["Tanggal", "Broker"],
                 value_vars=selected_fields,
@@ -329,7 +312,6 @@ if not combined_df.empty:
             total_market_df = total_market_df[["Tanggal", "Field", "TotalMarketValue"]]
 
             merged_df = pd.merge(melted_df, total_market_df, on=["Tanggal", "Field"], how="left")
-            # Calculate percentage: (Broker Value / Total Market Value) × 100
             merged_df["Percentage"] = merged_df.apply(
                 lambda row: (row["Value"] / row["TotalMarketValue"] * 100) if pd.notna(row["TotalMarketValue"]) and row["TotalMarketValue"] != 0 
                 else 0.0, axis=1)
@@ -338,17 +320,14 @@ if not combined_df.empty:
 
             if display_mode == "Monthly":
                 display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
-                # Aggregate values first
                 monthly_df = display_df.groupby(["Tanggal", "Broker", "Field"])["Value"].sum().reset_index()
                 
-                # Get the complete market totals from the original data (not just selected brokers)
                 monthly_market_totals = combined_df[
                     (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
                     (combined_df["Tanggal"] <= pd.to_datetime(date_to))
                 ].copy()
                 monthly_market_totals["Tanggal"] = monthly_market_totals["Tanggal"].dt.to_period("M").dt.to_timestamp()
                 
-                # Get Total Market values for each month/field
                 monthly_market_melted = monthly_market_totals[monthly_market_totals["Broker"] == "Total Market"].melt(
                     id_vars=["Tanggal", "Broker"],
                     value_vars=selected_fields,
@@ -359,7 +338,6 @@ if not combined_df.empty:
                 
                 display_df = pd.merge(monthly_df, monthly_market_aggregated, on=["Tanggal", "Field"], how="left")
                 
-                # Calculate percentage: (Broker Value / Total Market Value) × 100
                 display_df["Percentage"] = display_df.apply(
                     lambda row: (row["Value"] / row["MarketTotal"] * 100) if pd.notna(row["MarketTotal"]) and row["MarketTotal"] != 0 and row["Broker"] != "Total Market"
                     else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
@@ -370,17 +348,14 @@ if not combined_df.empty:
                 ]
             elif display_mode == "Yearly":
                 display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("Y").dt.to_timestamp()
-                # Aggregate values first
                 yearly_df = display_df.groupby(["Tanggal", "Broker", "Field"])["Value"].sum().reset_index()
                 
-                # Get the complete market totals from the original data (not just selected brokers)
                 yearly_market_totals = combined_df[
                     (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
                     (combined_df["Tanggal"] <= pd.to_datetime(date_to))
                 ].copy()
                 yearly_market_totals["Tanggal"] = yearly_market_totals["Tanggal"].dt.to_period("Y").dt.to_timestamp()
                 
-                # Get Total Market values for each year/field
                 yearly_market_melted = yearly_market_totals[yearly_market_totals["Broker"] == "Total Market"].melt(
                     id_vars=["Tanggal", "Broker"],
                     value_vars=selected_fields,
@@ -391,7 +366,6 @@ if not combined_df.empty:
                 
                 display_df = pd.merge(yearly_df, yearly_market_aggregated, on=["Tanggal", "Field"], how="left")
                 
-                # Calculate percentage: (Broker Value / Total Market Value) × 100
                 display_df["Percentage"] = display_df.apply(
                     lambda row: (row["Value"] / row["MarketTotal"] * 100) if pd.notna(row["MarketTotal"]) and row["MarketTotal"] != 0 and row["Broker"] != "Total Market"
                     else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
@@ -409,20 +383,15 @@ if not combined_df.empty:
                 '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
             )
             
-            # Create a sorting key: Total Market = 0, other brokers = 1
             display_df_for_table["Sort_Priority"] = display_df_for_table["Broker"].apply(
                 lambda x: 0 if x == "Total Market" else 1
             )
             
-            # Sort by date first (oldest first), then by priority (Total Market first), then by broker name
             display_df_for_table = display_df_for_table.sort_values(
                 ["Tanggal", "Sort_Priority", "Broker"]
             )
             
-            # Remove the temporary sorting column
             display_df_for_table = display_df_for_table.drop("Sort_Priority", axis=1)
-            
-            # Reset index and create sequential numbering starting from 1
             display_df_for_table = display_df_for_table.reset_index(drop=True)
             display_df_for_table.index = display_df_for_table.index + 1
 
@@ -438,16 +407,19 @@ if not combined_df.empty:
 
             tab1, tab2 = st.tabs(["📈 Nilai", "📊 Kontribusi Terhadap Total (%)"])
 
+            def format_hover_value(value):
+                if value >= 1_000_000_000_000:
+                    return f"{value / 1_000_000_000_000:.4f}T"
+                elif value >= 1_000_000_000:
+                    return f"{value / 1_000_000_000:.4f}B"
+                else:
+                    return f"{value:,.0f}"
+
             with tab1:
                 for field in selected_fields:
-                    # Use the same processed data that's shown in the table
                     chart_data = display_df[display_df["Field"] == field].copy()
-                    
-                    # Sort by date to ensure proper line connections
                     chart_data = chart_data.sort_values("Tanggal")
                     
-                    # Create the base line chart with custom color palette (avoiding red/green)
-                    custom_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
                     broker_colors = ['#1f77b4', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#aec7e8', '#ffbb78']
                     
                     fig = px.line(
@@ -460,19 +432,8 @@ if not combined_df.empty:
                         color_discrete_sequence=broker_colors
                     )
                     
-                    # Function to format values for hover display
-                    def format_hover_value(value):
-                        if value >= 1_000_000_000_000:  # Trillion
-                            return f"{value / 1_000_000_000_000:.4f}T"
-                        elif value >= 1_000_000_000:  # Billion
-                            return f"{value / 1_000_000_000:.4f}B"
-                        else:
-                            return f"{value:,.0f}"
-                    
-                    # Update all traces with proper hover (let Plotly handle colors automatically)
                     for i, trace in enumerate(fig.data):
                         broker_name = trace.name
-                        # Create custom hover text for each point
                         hover_texts = [f"<b>{broker_name}</b><br>Tanggal: {date}<br>{field}: {format_hover_value(value)}" 
                                       for date, value in zip(chart_data[chart_data["Broker"] == broker_name]["Tanggal"].dt.strftime('%Y-%m-%d'), 
                                                            chart_data[chart_data["Broker"] == broker_name]["Value"])]
@@ -483,10 +444,9 @@ if not combined_df.empty:
                             legendgroup=broker_name
                         )
                     
-                    # Add color coding for min/max values for each broker
                     for broker in chart_data["Broker"].unique():
                         broker_data = chart_data[chart_data["Broker"] == broker].copy()
-                        if len(broker_data) > 1:  # Only add min/max if there's more than one point
+                        if len(broker_data) > 1:
                             min_idx = broker_data["Value"].idxmin()
                             max_idx = broker_data["Value"].idxmax()
                             
@@ -495,7 +455,6 @@ if not combined_df.empty:
                             max_date = broker_data.loc[max_idx, "Tanggal"]
                             max_value = broker_data.loc[max_idx, "Value"]
                             
-                            # Add red dot for minimum value
                             min_formatted = format_hover_value(min_value)
                             fig.add_scatter(
                                 x=[min_date],
@@ -508,7 +467,6 @@ if not combined_df.empty:
                                 hovertemplate=f"<b>{broker}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Nilai Terendah: {min_formatted}<extra></extra>"
                             )
                             
-                            # Add green dot for maximum value
                             max_formatted = format_hover_value(max_value)
                             fig.add_scatter(
                                 x=[max_date],
@@ -530,13 +488,9 @@ if not combined_df.empty:
 
             with tab2:
                 for field in selected_fields:
-                    # Use the same processed data that's shown in the table
                     chart_data = display_df[display_df["Field"] == field].copy()
-                    
-                    # Sort by date to ensure proper line connections
                     chart_data = chart_data.sort_values("Tanggal")
                     
-                    # Create the base line chart with custom color palette (avoiding red/green)
                     broker_colors = ['#1f77b4', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#aec7e8', '#ffbb78']
                     
                     fig = px.line(
@@ -549,7 +503,6 @@ if not combined_df.empty:
                         color_discrete_sequence=broker_colors
                     )
                     
-                    # Update all traces with proper hover (let Plotly handle colors automatically)
                     for i, trace in enumerate(fig.data):
                         broker_name = trace.name
                         trace.update(
@@ -558,10 +511,9 @@ if not combined_df.empty:
                             legendgroup=broker_name
                         )
                     
-                    # Add color coding for min/max values for each broker
                     for broker in chart_data["Broker"].unique():
                         broker_data = chart_data[chart_data["Broker"] == broker].copy()
-                        if len(broker_data) > 1:  # Only add min/max if there's more than one point
+                        if len(broker_data) > 1:
                             min_idx = broker_data["Percentage"].idxmin()
                             max_idx = broker_data["Percentage"].idxmax()
                             
@@ -570,7 +522,6 @@ if not combined_df.empty:
                             max_date = broker_data.loc[max_idx, "Tanggal"]
                             max_percentage = broker_data.loc[max_idx, "Percentage"]
                             
-                            # Add red dot for minimum percentage
                             fig.add_scatter(
                                 x=[min_date],
                                 y=[min_percentage],
@@ -582,7 +533,6 @@ if not combined_df.empty:
                                 hovertemplate=f"<b>{broker}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Kontribusi Terendah: {min_percentage:.2f}%<extra></extra>"
                             )
                             
-                            # Add green dot for maximum percentage
                             fig.add_scatter(
                                 x=[max_date],
                                 y=[max_percentage],
@@ -626,7 +576,6 @@ if not combined_df.empty:
         ]
 
     else:  # Bulanan
-        # Extract month periods and unique years
         combined_df["MonthPeriod"] = combined_df["Tanggal"].dt.to_period("M")
         all_months = sorted(combined_df["MonthPeriod"].unique())
         all_years = sorted(set(m.year for m in all_months))
@@ -639,7 +588,6 @@ if not combined_df.empty:
             key="rank_year_select"
         )
 
-        # Filter available months based on selected years
         month_options = [m for m in all_months if m.year in selected_years]
 
         selected_months = st.multiselect(
@@ -665,12 +613,10 @@ if not combined_df.empty:
             .reset_index()
         )
         
-        # Create sequential ranking starting from 1
         ranked_df["Peringkat"] = range(1, len(ranked_df) + 1)
         ranked_df = ranked_df[["Peringkat", "Broker", column]]
         total = ranked_df[column].sum()
 
-        # Format the values for display
         ranked_df[column] = ranked_df[column].apply(lambda x: f"{x:,.0f}")
 
         total_row = pd.DataFrame([{
