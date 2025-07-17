@@ -259,11 +259,23 @@ if not combined_df.empty:
         year_start = datetime(today.year, 1, 1).date()
 
         if display_mode == "Daily":
-            col1, col2 = st.columns(2)
-            with col1:
-                date_from = st.date_input("Dari Tanggal", min_value=min_date, max_value=max_date, value=year_start)
-            with col2:
-                date_to = st.date_input("Sampai Tanggal", min_value=min_date, max_value=max_date, value=max_date)
+            date_range = st.date_input(
+                "Pilih Rentang Tanggal",
+                value=(year_start, max_date),
+                min_value=min_date,
+                max_value=max_date,
+                help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai"
+            )
+            if isinstance(date_range, tuple):
+                if len(date_range) == 2:
+                    date_from, date_to = date_range
+                elif len(date_range) == 1:
+                    date_from = date_to = date_range[0]
+                else:
+                    date_from = date_to = year_start
+            else:
+                # Single date selected (first click)
+                date_from = date_to = date_range
         elif display_mode == "Monthly":
             all_months = combined_df["Tanggal"].dt.to_period("M")
             unique_years = sorted(set(m.year for m in all_months.unique()))
@@ -563,11 +575,24 @@ if not combined_df.empty:
         min_rank_date = datetime(datetime.today().year, 1, 1).date()
         max_rank_date = combined_df["Tanggal"].max().date()
 
-        col1, col2 = st.columns(2)
-        with col1:
-            rank_date_from = st.date_input("Dari Tanggal", value=min_rank_date, min_value=min_rank_date, max_value=max_rank_date, key="rank_date_from")
-        with col2:
-            rank_date_to = st.date_input("Sampai Tanggal", value=max_rank_date, min_value=min_rank_date, max_value=max_rank_date, key="rank_date_to")
+        rank_date_range = st.date_input(
+            "Pilih Rentang Tanggal untuk Ranking",
+            value=(min_rank_date, max_rank_date),
+            min_value=min_rank_date,
+            max_value=max_rank_date,
+            help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai",
+            key="rank_date_range"
+        )
+        if isinstance(rank_date_range, tuple):
+            if len(rank_date_range) == 2:
+                rank_date_from, rank_date_to = rank_date_range
+            elif len(rank_date_range) == 1:
+                rank_date_from = rank_date_to = rank_date_range[0]
+            else:
+                rank_date_from = rank_date_to = min_rank_date
+        else:
+            # Single date selected (first click)
+            rank_date_from = rank_date_to = rank_date_range
 
         filtered_rank_df = combined_df[
             (combined_df["Tanggal"] >= pd.to_datetime(rank_date_from)) &
@@ -613,16 +638,20 @@ if not combined_df.empty:
             .reset_index()
         )
         
-        ranked_df["Peringkat"] = range(1, len(ranked_df) + 1)
-        ranked_df = ranked_df[["Peringkat", "Broker", column]]
+        ranked_df["Peringkat"] = [str(i) for i in range(1, len(ranked_df) + 1)]
         total = ranked_df[column].sum()
-
+        
+        # Calculate market share percentage
+        ranked_df["Market Share (%)"] = (ranked_df[column] / total * 100).apply(lambda x: f"{x:.2f}%")
+        
+        ranked_df = ranked_df[["Peringkat", "Broker", column, "Market Share (%)"]]
         ranked_df[column] = ranked_df[column].apply(lambda x: f"{x:,.0f}")
 
         total_row = pd.DataFrame([{
             "Peringkat": "TOTAL",
             "Broker": "TOTAL",
-            column: f"{total:,.0f}"
+            column: f"{total:,.0f}",
+            "Market Share (%)": "100.00%"
         }])
 
         ranked_df = pd.concat([ranked_df, total_row], ignore_index=True)
