@@ -78,9 +78,10 @@ if uploaded_files:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_all_excel():
-    """Highly optimized loading function with concurrent processing"""
+    """Ultra-optimized loading function with enhanced performance"""
     import concurrent.futures
     from threading import Lock
+    import os
     
     all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
     xlsx_files = [f for f in all_files if f.endswith(".xlsx")]
@@ -100,20 +101,26 @@ def load_all_excel():
     processed_count = 0
 
     def process_file(file):
-        """Process a single Excel file"""
+        """Process a single Excel file with optimizations"""
         try:
             match = re.search(r"(\d{8})", file)
             file_date = datetime.strptime(match.group(1), "%Y%m%d").date() if match else None
 
-            path = hf_hub_download(
-                REPO_ID, 
-                filename=file, 
-                repo_type="dataset", 
-                token=HF_TOKEN,
-                local_dir="./hf_cache",
-                force_download=False
-            )
+            # Check if file exists in cache first
+            cache_path = f"./hf_cache/{file}"
+            if not os.path.exists(cache_path):
+                path = hf_hub_download(
+                    REPO_ID, 
+                    filename=file, 
+                    repo_type="dataset", 
+                    token=HF_TOKEN,
+                    local_dir="./hf_cache",
+                    force_download=False
+                )
+            else:
+                path = cache_path
 
+            # Optimized Excel reading with minimal processing
             df = pd.read_excel(
                 path, 
                 sheet_name="Sheet1",
@@ -124,10 +131,12 @@ def load_all_excel():
                     'Volume': 'int64',
                     'Nilai': 'int64',
                     'Frekuensi': 'int64'
-                }
+                },
+                usecols=['Kode Perusahaan', 'Nama Perusahaan', 'Volume', 'Nilai', 'Frekuensi']
             )
+            
+            # Minimal processing - defer heavy operations
             df.columns = df.columns.str.strip()
-
             df["Tanggal"] = file_date
             df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
             df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
@@ -137,17 +146,19 @@ def load_all_excel():
         except Exception as e:
             return None, file
 
-    max_workers = min(8, len(xlsx_files))
+    # Increased worker count for better throughput
+    max_workers = min(16, len(xlsx_files), os.cpu_count() * 2)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_file = {executor.submit(process_file, file): file for file in xlsx_files}
+        # Submit all tasks at once for better scheduling
+        futures = [executor.submit(process_file, file) for file in xlsx_files]
         
-        for future in concurrent.futures.as_completed(future_to_file):
+        for future in concurrent.futures.as_completed(futures):
             with lock:
                 processed_count += 1
                 progress = processed_count / total_files
                 progress_bar.progress(progress)
-                status_text.text(f"📁 Loading {processed_count} of {total_files} files...")
+                status_text.text(f"📁 Loading {processed_count}/{total_files} files...")
             
             df, failed_file = future.result()
             
@@ -158,23 +169,8 @@ def load_all_excel():
                 with lock:
                     failed_files.append(failed_file)
 
-    # Retry failed files once
-    if failed_files:
-        status_text.text(f"🔄 Retrying {len(failed_files)} failed files...")
-        retry_failed = []
-
-        for i, file in enumerate(failed_files):
-            progress = (total_files - len(failed_files) + i + 1) / total_files
-            progress_bar.progress(progress)
-            status_text.text(f"🔄 Retrying {i + 1} of {len(failed_files)} failed files...")
-            
-            df, failed_file = process_file(file)
-            if df is not None:
-                all_data.append(df)
-            else:
-                retry_failed.append(failed_file)
-
-        failed_files = retry_failed
+    # Skip retry for failed files to speed up loading
+    # Users can refresh if needed
 
     progress_bar.empty()
     status_text.empty()
@@ -183,8 +179,10 @@ def load_all_excel():
         st.error("❌ No files could be loaded successfully.")
         return pd.DataFrame(), len(xlsx_files), failed_files
 
-    combined = pd.concat(all_data, ignore_index=True, sort=False)
+    # Optimized concatenation
+    combined = pd.concat(all_data, ignore_index=True, sort=False, copy=False)
 
+    # Optimized broker name mapping
     latest_names = (
         combined.sort_values("Tanggal")
         .drop_duplicates("Kode Perusahaan", keep="last")
@@ -193,13 +191,14 @@ def load_all_excel():
     combined["Broker"] = combined["Kode Perusahaan"].map(latest_names).fillna('') 
     combined["Broker"] = combined["Kode Perusahaan"] + "_" + combined["Broker"]
 
+    # Optimized market aggregation
     market_aggregated = combined.groupby("Tanggal", as_index=False)[["Volume", "Nilai", "Frekuensi"]].sum()
     market_aggregated["Broker"] = "Total Market"
     market_aggregated["FieldSource"] = "Generated"
     market_aggregated["Kode Perusahaan"] = "TOTAL"
     market_aggregated["Nama Perusahaan"] = "Total Market"
     
-    combined = pd.concat([combined, market_aggregated], ignore_index=True, sort=False)
+    combined = pd.concat([combined, market_aggregated], ignore_index=True, sort=False, copy=False)
 
     return combined, len(xlsx_files), failed_files
 
@@ -266,16 +265,11 @@ if not combined_df.empty:
                 max_value=max_date,
                 help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai"
             )
-            if isinstance(date_range, tuple):
-                if len(date_range) == 2:
-                    date_from, date_to = date_range
-                elif len(date_range) == 1:
-                    date_from = date_to = date_range[0]
-                else:
-                    date_from = date_to = year_start
+            if isinstance(date_range, tuple) and len(date_range) == 2:
+                date_from, date_to = date_range
             else:
-                # Single date selected (first click)
-                date_from = date_to = date_range
+                # Only single date selected, don't show data yet
+                date_from = date_to = None
         elif display_mode == "Monthly":
             all_months = combined_df["Tanggal"].dt.to_period("M")
             unique_years = sorted(set(m.year for m in all_months.unique()))
@@ -583,22 +577,20 @@ if not combined_df.empty:
             help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai",
             key="rank_date_range"
         )
-        if isinstance(rank_date_range, tuple):
-            if len(rank_date_range) == 2:
-                rank_date_from, rank_date_to = rank_date_range
-            elif len(rank_date_range) == 1:
-                rank_date_from = rank_date_to = rank_date_range[0]
-            else:
-                rank_date_from = rank_date_to = min_rank_date
+        if isinstance(rank_date_range, tuple) and len(rank_date_range) == 2:
+            rank_date_from, rank_date_to = rank_date_range
         else:
-            # Single date selected (first click)
-            rank_date_from = rank_date_to = rank_date_range
+            # Only single date selected, don't show data yet
+            rank_date_from = rank_date_to = None
 
-        filtered_rank_df = combined_df[
-            (combined_df["Tanggal"] >= pd.to_datetime(rank_date_from)) &
-            (combined_df["Tanggal"] <= pd.to_datetime(rank_date_to)) &
-            (combined_df["Broker"] != "Total Market")
-        ]
+        if rank_date_from is not None and rank_date_to is not None:
+            filtered_rank_df = combined_df[
+                (combined_df["Tanggal"] >= pd.to_datetime(rank_date_from)) &
+                (combined_df["Tanggal"] <= pd.to_datetime(rank_date_to)) &
+                (combined_df["Broker"] != "Total Market")
+            ]
+        else:
+            filtered_rank_df = pd.DataFrame()
 
     else:  # Bulanan
         combined_df["MonthPeriod"] = combined_df["Tanggal"].dt.to_period("M")
@@ -678,6 +670,8 @@ if not combined_df.empty:
             df_vol, total_vol = generate_full_table(filtered_rank_df, "Volume")
             st.dataframe(df_vol, use_container_width=True)
             st.markdown(f"**Total Volume Seluruh Broker:** {total_vol:,.0f} lot")
+    elif mode == "Harian" and (rank_date_from is None or rank_date_to is None):
+        st.info("📌 Silakan pilih kedua tanggal (mulai dan selesai) untuk melihat data ranking.")
     else:
         st.info("📌 Tidak ada data untuk rentang tanggal yang dipilih.")
 
