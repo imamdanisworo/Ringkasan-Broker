@@ -7,6 +7,7 @@ from datetime import datetime
 import plotly.express as px
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 import uuid
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 st.set_page_config(page_title="Ringkasan Broker", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
@@ -401,9 +402,46 @@ if not combined_df.empty:
             display_df_for_table = display_df_for_table.reset_index(drop=True)
             display_df_for_table.index = display_df_for_table.index + 1
 
-            st.dataframe(
-                display_df_for_table[["Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]]
-                .rename(columns={"Tanggal Display": "Tanggal"})
+            # Add row numbering and prepare main table data with raw numeric values for sorting
+            main_table_df = display_df_for_table[["Tanggal", "Tanggal Display", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
+            main_table_df["No"] = range(1, len(main_table_df) + 1)
+            
+            # Add raw numeric values from original display_df for proper sorting
+            main_table_df = pd.merge(main_table_df, display_df[["Tanggal", "Broker", "Field", "Value", "Percentage"]], 
+                                   on=["Tanggal", "Broker", "Field"], how="left")
+            
+            main_table_df = main_table_df[["No", "Tanggal", "Broker", "Field", "Value", "Percentage", "Formatted Value", "Formatted %"]]
+            
+            # Configure AgGrid for main summary table
+            gb_main = GridOptionsBuilder.from_dataframe(main_table_df)
+            gb_main.configure_pagination(enabled=False)
+            gb_main.configure_default_column(groupable=False, value=True, enableRowGroup=False, aggFunc="sum", editable=False, resizable=True)
+            gb_main.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
+            gb_main.configure_column("No", width=70, pinned="left", type=["numericColumn"])
+            gb_main.configure_column("Tanggal", width=120, pinned="left", 
+                                   valueFormatter="new Date(value).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})")
+            gb_main.configure_column("Broker", width=250, pinned="left")
+            gb_main.configure_column("Field", width=100)
+            gb_main.configure_column("Value", width=180, type=["numericColumn"], 
+                                   valueFormatter="'Rp ' + Math.floor(value).toLocaleString()", headerName="Nilai")
+            gb_main.configure_column("Percentage", width=120, type=["numericColumn"],
+                                   valueFormatter="value.toFixed(2) + '%'", headerName="Market Share (%)")
+            # Hide the formatted columns since we're showing formatted versions of numeric columns
+            gb_main.configure_column("Formatted Value", hide=True)
+            gb_main.configure_column("Formatted %", hide=True)
+            
+            grid_options_main = gb_main.build()
+            
+            AgGrid(
+                main_table_df,
+                gridOptions=grid_options_main,
+                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                update_mode=GridUpdateMode.MODEL_CHANGED,
+                fit_columns_on_grid_load=True,
+                enable_enterprise_modules=True,
+                height=400,
+                width='100%',
+                reload_data=False
             )
 
             to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
@@ -633,20 +671,11 @@ if not combined_df.empty:
         ranked_df["Peringkat"] = [str(i) for i in range(1, len(ranked_df) + 1)]
         total = ranked_df[column].sum()
         
-        # Calculate market share percentage
-        ranked_df["Market Share (%)"] = (ranked_df[column] / total * 100).apply(lambda x: f"{x:.2f}%")
+        # Calculate market share percentage as numeric values
+        ranked_df["Market Share"] = (ranked_df[column] / total * 100)
         
-        ranked_df = ranked_df[["Peringkat", "Broker", column, "Market Share (%)"]]
-        ranked_df[column] = ranked_df[column].apply(lambda x: f"{x:,.0f}")
-
-        total_row = pd.DataFrame([{
-            "Peringkat": "TOTAL",
-            "Broker": "TOTAL",
-            column: f"{total:,.0f}",
-            "Market Share (%)": "100.00%"
-        }])
-
-        ranked_df = pd.concat([ranked_df, total_row], ignore_index=True)
+        # Keep original numeric values for proper sorting
+        ranked_df = ranked_df[["Peringkat", "Broker", column, "Market Share"]]
 
         return ranked_df, total
 
@@ -656,19 +685,94 @@ if not combined_df.empty:
         with tab_val:
             st.subheader("🔝 Peringkat Berdasarkan Nilai")
             df_val, total_val = generate_full_table(filtered_rank_df, "Nilai")
-            st.dataframe(df_val, use_container_width=True)
+            
+            # Configure AgGrid for ranking table with proper numeric sorting
+            gb_val = GridOptionsBuilder.from_dataframe(df_val)
+            gb_val.configure_pagination(enabled=False)
+            gb_val.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True)
+            gb_val.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
+            gb_val.configure_column("Peringkat", width=80, pinned="left", type=["numericColumn"])
+            gb_val.configure_column("Broker", width=300, pinned="left")
+            gb_val.configure_column("Nilai", width=200, type=["numericColumn"], 
+                                  valueFormatter="'Rp ' + Math.floor(value).toLocaleString()")
+            gb_val.configure_column("Market Share", width=150, type=["numericColumn"],
+                                  valueFormatter="value.toFixed(2) + '%'")
+            
+            grid_options_val = gb_val.build()
+            
+            AgGrid(
+                df_val,
+                gridOptions=grid_options_val,
+                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                update_mode=GridUpdateMode.MODEL_CHANGED,
+                fit_columns_on_grid_load=True,
+                enable_enterprise_modules=True,
+                height=400,
+                width='100%',
+                reload_data=False
+            )
             st.markdown(f"**Total Nilai Seluruh Broker:** Rp {total_val:,.0f}")
 
         with tab_freq:
             st.subheader("🔝 Peringkat Berdasarkan Frekuensi")
             df_freq, total_freq = generate_full_table(filtered_rank_df, "Frekuensi")
-            st.dataframe(df_freq, use_container_width=True)
+            
+            # Configure AgGrid for ranking table with proper numeric sorting
+            gb_freq = GridOptionsBuilder.from_dataframe(df_freq)
+            gb_freq.configure_pagination(enabled=False)
+            gb_freq.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
+            gb_freq.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
+            gb_freq.configure_column("Peringkat", width=80, pinned="left", type=["numericColumn"], flex=0)
+            gb_freq.configure_column("Broker", minWidth=250, pinned="left", flex=3)
+            gb_freq.configure_column("Frekuensi", minWidth=150, type=["numericColumn"],
+                                   valueFormatter="Math.floor(value).toLocaleString()", flex=2)
+            gb_freq.configure_column("Market Share", minWidth=120, type=["numericColumn"],
+                                   valueFormatter="value.toFixed(2) + '%'", flex=1)
+            
+            grid_options_freq = gb_freq.build()
+            
+            AgGrid(
+                df_freq,
+                gridOptions=grid_options_freq,
+                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                update_mode=GridUpdateMode.MODEL_CHANGED,
+                fit_columns_on_grid_load=True,
+                enable_enterprise_modules=True,
+                height=400,
+                width='100%',
+                reload_data=False
+            )
             st.markdown(f"**Total Frekuensi Seluruh Broker:** {total_freq:,.0f} transaksi")
 
         with tab_vol:
             st.subheader("🔝 Peringkat Berdasarkan Volume")
             df_vol, total_vol = generate_full_table(filtered_rank_df, "Volume")
-            st.dataframe(df_vol, use_container_width=True)
+            
+            # Configure AgGrid for ranking table with proper numeric sorting
+            gb_vol = GridOptionsBuilder.from_dataframe(df_vol)
+            gb_vol.configure_pagination(enabled=False)
+            gb_vol.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
+            gb_vol.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
+            gb_vol.configure_column("Peringkat", width=80, pinned="left", type=["numericColumn"], flex=0)
+            gb_vol.configure_column("Broker", minWidth=250, pinned="left", flex=3)
+            gb_vol.configure_column("Volume", minWidth=150, type=["numericColumn"],
+                                  valueFormatter="Math.floor(value).toLocaleString()", flex=2)
+            gb_vol.configure_column("Market Share", minWidth=120, type=["numericColumn"],
+                                  valueFormatter="value.toFixed(2) + '%'", flex=1)
+            
+            grid_options_vol = gb_vol.build()
+            
+            AgGrid(
+                df_vol,
+                gridOptions=grid_options_vol,
+                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                update_mode=GridUpdateMode.MODEL_CHANGED,
+                fit_columns_on_grid_load=True,
+                enable_enterprise_modules=True,
+                height=400,
+                width='100%',
+                reload_data=False
+            )
             st.markdown(f"**Total Volume Seluruh Broker:** {total_vol:,.0f} lot")
     elif mode == "Harian" and (rank_date_from is None or rank_date_to is None):
         st.info("📌 Silakan pilih kedua tanggal (mulai dan selesai) untuk melihat data ranking.")
