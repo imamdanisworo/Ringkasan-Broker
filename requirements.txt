@@ -1,5 +1,7 @@
+
 streamlit
 pandas
 openpyxl
 huggingface_hub
 plotly
+streamlit-aggrid
