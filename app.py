@@ -541,31 +541,34 @@ if not combined_df.empty:
                 # Configure AgGrid for main summary table
                 gb_main = GridOptionsBuilder.from_dataframe(main_table_df)
                 gb_main.configure_pagination(enabled=False)
-                gb_main.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True)
+                gb_main.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
                 gb_main.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                gb_main.configure_column("No", width=70, pinned="left", type=["numericColumn"])
-                gb_main.configure_column("Tanggal", width=120, pinned="left", type=["dateColumn"],
+                gb_main.configure_column("No", width=80, pinned="left", type=["numericColumn"], flex=0)
+                gb_main.configure_column("Tanggal", minWidth=150, pinned="left", type=["dateColumn"], flex=1,
                                        valueFormatter="new Date(value).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})")
-                gb_main.configure_column("Broker", width=250, pinned="left")
-                gb_main.configure_column("Field", width=100)
-                gb_main.configure_column("Value", width=180, type=["numericColumn"], 
+                gb_main.configure_column("Broker", minWidth=300, pinned="left", flex=3)
+                gb_main.configure_column("Field", minWidth=120, flex=1)
+                gb_main.configure_column("Value", minWidth=200, type=["numericColumn"], flex=2,
                                        valueFormatter="'Rp ' + Math.floor(value).toLocaleString()", headerName="Nilai")
-                gb_main.configure_column("Percentage", width=120, type=["numericColumn"],
+                gb_main.configure_column("Percentage", minWidth=150, type=["numericColumn"], flex=1,
                                        valueFormatter="value.toFixed(2) + '%'", headerName="Market Share (%)")
                 
                 grid_options_main = gb_main.build()
                 
-                AgGrid(
-                    main_table_df,
-                    gridOptions=grid_options_main,
-                    data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                    update_mode=GridUpdateMode.MODEL_CHANGED,
-                    fit_columns_on_grid_load=True,
-                    enable_enterprise_modules=True,
-                    height=400,
-                    width='100%',
-                    reload_data=False
-                )
+                # Center the table using columns
+                col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
+                with col2:
+                    AgGrid(
+                        main_table_df,
+                        gridOptions=grid_options_main,
+                        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                        update_mode=GridUpdateMode.MODEL_CHANGED,
+                        fit_columns_on_grid_load=True,
+                        enable_enterprise_modules=True,
+                        height=400,
+                        width='100%',
+                        reload_data=False
+                    )
 
                 # Download functionality
                 to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
@@ -854,28 +857,31 @@ if not combined_df.empty:
                     # Configure AgGrid for ranking table
                     gb_val = GridOptionsBuilder.from_dataframe(df_val)
                     gb_val.configure_pagination(enabled=False)
-                    gb_val.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True)
+                    gb_val.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
                     gb_val.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_val.configure_column("Peringkat", width=80, pinned="left", type=["numericColumn"])
-                    gb_val.configure_column("Broker", width=300, pinned="left")
-                    gb_val.configure_column("Nilai", width=200, type=["numericColumn"], 
+                    gb_val.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0)
+                    gb_val.configure_column("Broker", minWidth=350, pinned="left", flex=3)
+                    gb_val.configure_column("Nilai", minWidth=250, type=["numericColumn"], flex=2,
                                           valueFormatter="'Rp ' + Math.floor(value).toLocaleString()")
-                    gb_val.configure_column("Market Share", width=150, type=["numericColumn"],
+                    gb_val.configure_column("Market Share", minWidth=180, type=["numericColumn"], flex=1,
                                           valueFormatter="value.toFixed(2) + '%'")
                     
                     grid_options_val = gb_val.build()
                     
-                    AgGrid(
-                        df_val,
-                        gridOptions=grid_options_val,
-                        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                        update_mode=GridUpdateMode.MODEL_CHANGED,
-                        fit_columns_on_grid_load=True,
-                        enable_enterprise_modules=True,
-                        height=400,
-                        width='100%',
-                        reload_data=False
-                    )
+                    # Center the table using columns
+                    col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
+                    with col2:
+                        AgGrid(
+                            df_val,
+                            gridOptions=grid_options_val,
+                            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                            update_mode=GridUpdateMode.MODEL_CHANGED,
+                            fit_columns_on_grid_load=True,
+                            enable_enterprise_modules=True,
+                            height=400,
+                            width='100%',
+                            reload_data=False
+                        )
                     st.markdown(f"**Total Nilai Seluruh Broker:** Rp {total_val:,.0f}")
                 else:
                     st.warning("❗ Tidak ada data untuk ranking nilai.")
@@ -890,26 +896,29 @@ if not combined_df.empty:
                     gb_freq.configure_pagination(enabled=False)
                     gb_freq.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
                     gb_freq.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_freq.configure_column("Peringkat", width=80, pinned="left", type=["numericColumn"], flex=0)
-                    gb_freq.configure_column("Broker", minWidth=250, pinned="left", flex=3)
-                    gb_freq.configure_column("Frekuensi", minWidth=150, type=["numericColumn"],
-                                           valueFormatter="Math.floor(value).toLocaleString()", flex=2)
-                    gb_freq.configure_column("Market Share", minWidth=120, type=["numericColumn"],
-                                           valueFormatter="value.toFixed(2) + '%'", flex=1)
+                    gb_freq.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0)
+                    gb_freq.configure_column("Broker", minWidth=350, pinned="left", flex=3)
+                    gb_freq.configure_column("Frekuensi", minWidth=200, type=["numericColumn"], flex=2,
+                                           valueFormatter="Math.floor(value).toLocaleString()")
+                    gb_freq.configure_column("Market Share", minWidth=180, type=["numericColumn"], flex=1,
+                                           valueFormatter="value.toFixed(2) + '%'")
                     
                     grid_options_freq = gb_freq.build()
                     
-                    AgGrid(
-                        df_freq,
-                        gridOptions=grid_options_freq,
-                        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                        update_mode=GridUpdateMode.MODEL_CHANGED,
-                        fit_columns_on_grid_load=True,
-                        enable_enterprise_modules=True,
-                        height=400,
-                        width='100%',
-                        reload_data=False
-                    )
+                    # Center the table using columns
+                    col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
+                    with col2:
+                        AgGrid(
+                            df_freq,
+                            gridOptions=grid_options_freq,
+                            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                            update_mode=GridUpdateMode.MODEL_CHANGED,
+                            fit_columns_on_grid_load=True,
+                            enable_enterprise_modules=True,
+                            height=400,
+                            width='100%',
+                            reload_data=False
+                        )
                     st.markdown(f"**Total Frekuensi Seluruh Broker:** {total_freq:,.0f} transaksi")
                 else:
                     st.warning("❗ Tidak ada data untuk ranking frekuensi.")
@@ -924,26 +933,29 @@ if not combined_df.empty:
                     gb_vol.configure_pagination(enabled=False)
                     gb_vol.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
                     gb_vol.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_vol.configure_column("Peringkat", width=80, pinned="left", type=["numericColumn"], flex=0)
-                    gb_vol.configure_column("Broker", minWidth=250, pinned="left", flex=3)
-                    gb_vol.configure_column("Volume", minWidth=150, type=["numericColumn"],
-                                          valueFormatter="Math.floor(value).toLocaleString()", flex=2)
-                    gb_vol.configure_column("Market Share", minWidth=120, type=["numericColumn"],
-                                          valueFormatter="value.toFixed(2) + '%'", flex=1)
+                    gb_vol.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0)
+                    gb_vol.configure_column("Broker", minWidth=350, pinned="left", flex=3)
+                    gb_vol.configure_column("Volume", minWidth=200, type=["numericColumn"], flex=2,
+                                          valueFormatter="Math.floor(value).toLocaleString()")
+                    gb_vol.configure_column("Market Share", minWidth=180, type=["numericColumn"], flex=1,
+                                          valueFormatter="value.toFixed(2) + '%'")
                     
                     grid_options_vol = gb_vol.build()
                     
-                    AgGrid(
-                        df_vol,
-                        gridOptions=grid_options_vol,
-                        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                        update_mode=GridUpdateMode.MODEL_CHANGED,
-                        fit_columns_on_grid_load=True,
-                        enable_enterprise_modules=True,
-                        height=400,
-                        width='100%',
-                        reload_data=False
-                    )
+                    # Center the table using columns
+                    col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
+                    with col2:
+                        AgGrid(
+                            df_vol,
+                            gridOptions=grid_options_vol,
+                            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                            update_mode=GridUpdateMode.MODEL_CHANGED,
+                            fit_columns_on_grid_load=True,
+                            enable_enterprise_modules=True,
+                            height=400,
+                            width='100%',
+                            reload_data=False
+                        )
                     st.markdown(f"**Total Volume Seluruh Broker:** {total_vol:,.0f} lot")
                 else:
                     st.warning("❗ Tidak ada data untuk ranking volume.")
