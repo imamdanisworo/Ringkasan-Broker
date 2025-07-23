@@ -452,61 +452,65 @@ if not combined_df.empty:
 
                 # Handle different display modes
                 if display_mode == "Monthly":
-                    display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("M").dt.to_timestamp()
-                    monthly_df = display_df.groupby(["Tanggal", "Broker", "Field"])["Value"].sum().reset_index()
+                    # Group by month but keep original dates for calculation
+                    display_df["MonthPeriod"] = display_df["Tanggal"].dt.to_period("M")
+                    monthly_df = display_df.groupby(["MonthPeriod", "Broker", "Field"])["Value"].sum().reset_index()
+                    
+                    # Convert to end of month for display
+                    monthly_df["Tanggal"] = monthly_df["MonthPeriod"].dt.end_time.dt.normalize()
+                    monthly_df = monthly_df.drop("MonthPeriod", axis=1)
                     
                     monthly_market_totals = combined_df[
                         (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
                         (combined_df["Tanggal"] <= pd.to_datetime(date_to))
                     ].copy()
-                    monthly_market_totals["Tanggal"] = monthly_market_totals["Tanggal"].dt.to_period("M").dt.to_timestamp()
+                    monthly_market_totals["MonthPeriod"] = monthly_market_totals["Tanggal"].dt.to_period("M")
                     
                     monthly_market_melted = monthly_market_totals[monthly_market_totals["Broker"] == "Total Market"].melt(
-                        id_vars=["Tanggal", "Broker"],
+                        id_vars=["MonthPeriod", "Broker"],
                         value_vars=selected_fields,
                         var_name="Field",
                         value_name="MarketTotal"
                     )
-                    monthly_market_aggregated = monthly_market_melted.groupby(["Tanggal", "Field"])["MarketTotal"].sum().reset_index()
+                    monthly_market_aggregated = monthly_market_melted.groupby(["MonthPeriod", "Field"])["MarketTotal"].sum().reset_index()
+                    monthly_market_aggregated["Tanggal"] = monthly_market_aggregated["MonthPeriod"].dt.end_time.dt.normalize()
+                    monthly_market_aggregated = monthly_market_aggregated.drop("MonthPeriod", axis=1)
                     
                     display_df = pd.merge(monthly_df, monthly_market_aggregated, on=["Tanggal", "Field"], how="left")
                     
                     display_df["Percentage"] = display_df.apply(
                         lambda row: (row["Value"] / row["MarketTotal"] * 100) if pd.notna(row["MarketTotal"]) and row["MarketTotal"] != 0 and row["Broker"] != "Total Market"
                         else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
-                    
-                    display_df = display_df[
-                        (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
-                        (display_df["Tanggal"] <= pd.to_datetime(date_to))
-                    ]
                 elif display_mode == "Yearly":
-                    display_df["Tanggal"] = display_df["Tanggal"].dt.to_period("Y").dt.to_timestamp()
-                    yearly_df = display_df.groupby(["Tanggal", "Broker", "Field"])["Value"].sum().reset_index()
+                    # Group by year but keep original dates for calculation
+                    display_df["YearPeriod"] = display_df["Tanggal"].dt.to_period("Y")
+                    yearly_df = display_df.groupby(["YearPeriod", "Broker", "Field"])["Value"].sum().reset_index()
+                    
+                    # Convert to end of year for display
+                    yearly_df["Tanggal"] = yearly_df["YearPeriod"].dt.end_time.dt.normalize()
+                    yearly_df = yearly_df.drop("YearPeriod", axis=1)
                     
                     yearly_market_totals = combined_df[
                         (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
                         (combined_df["Tanggal"] <= pd.to_datetime(date_to))
                     ].copy()
-                    yearly_market_totals["Tanggal"] = yearly_market_totals["Tanggal"].dt.to_period("Y").dt.to_timestamp()
+                    yearly_market_totals["YearPeriod"] = yearly_market_totals["Tanggal"].dt.to_period("Y")
                     
                     yearly_market_melted = yearly_market_totals[yearly_market_totals["Broker"] == "Total Market"].melt(
-                        id_vars=["Tanggal", "Broker"],
+                        id_vars=["YearPeriod", "Broker"],
                         value_vars=selected_fields,
                         var_name="Field",
                         value_name="MarketTotal"
                     )
-                    yearly_market_aggregated = yearly_market_melted.groupby(["Tanggal", "Field"])["MarketTotal"].sum().reset_index()
+                    yearly_market_aggregated = yearly_market_melted.groupby(["YearPeriod", "Field"])["MarketTotal"].sum().reset_index()
+                    yearly_market_aggregated["Tanggal"] = yearly_market_aggregated["YearPeriod"].dt.end_time.dt.normalize()
+                    yearly_market_aggregated = yearly_market_aggregated.drop("YearPeriod", axis=1)
                     
                     display_df = pd.merge(yearly_df, yearly_market_aggregated, on=["Tanggal", "Field"], how="left")
                     
                     display_df["Percentage"] = display_df.apply(
                         lambda row: (row["Value"] / row["MarketTotal"] * 100) if pd.notna(row["MarketTotal"]) and row["MarketTotal"] != 0 and row["Broker"] != "Total Market"
                         else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
-                    
-                    display_df = display_df[
-                        (display_df["Tanggal"] >= pd.to_datetime(date_from)) &
-                        (display_df["Tanggal"] <= pd.to_datetime(date_to))
-                    ]
 
                 # Prepare table data
                 display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
