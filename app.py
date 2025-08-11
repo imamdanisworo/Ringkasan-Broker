@@ -549,7 +549,8 @@ if not combined_df.empty:
                 gb_main.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
                 gb_main.configure_column("No", width=80, pinned="left", type=["numericColumn"], flex=0)
                 gb_main.configure_column("Tanggal", minWidth=150, pinned="left", type=["dateColumn"], flex=1,
-                                       valueFormatter="new Date(value).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})")
+                                       valueFormatter="new Date(value).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})",
+                                       sort="desc")
                 gb_main.configure_column("Broker", minWidth=300, pinned="left", flex=3)
                 gb_main.configure_column("Field", minWidth=120, flex=1)
                 gb_main.configure_column("Value", minWidth=200, type=["numericColumn"], flex=2,
@@ -863,7 +864,7 @@ if not combined_df.empty:
                     gb_val.configure_pagination(enabled=False)
                     gb_val.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
                     gb_val.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_val.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0)
+                    gb_val.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0, sort="asc")
                     gb_val.configure_column("Broker", minWidth=350, pinned="left", flex=3)
                     gb_val.configure_column("Nilai", minWidth=250, type=["numericColumn"], flex=2,
                                           valueFormatter="'Rp ' + Math.floor(value).toLocaleString()")
@@ -900,7 +901,7 @@ if not combined_df.empty:
                     gb_freq.configure_pagination(enabled=False)
                     gb_freq.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
                     gb_freq.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_freq.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0)
+                    gb_freq.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0, sort="asc")
                     gb_freq.configure_column("Broker", minWidth=350, pinned="left", flex=3)
                     gb_freq.configure_column("Frekuensi", minWidth=200, type=["numericColumn"], flex=2,
                                            valueFormatter="Math.floor(value).toLocaleString()")
@@ -937,7 +938,7 @@ if not combined_df.empty:
                     gb_vol.configure_pagination(enabled=False)
                     gb_vol.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
                     gb_vol.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_vol.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0)
+                    gb_vol.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0, sort="asc")
                     gb_vol.configure_column("Broker", minWidth=350, pinned="left", flex=3)
                     gb_vol.configure_column("Volume", minWidth=200, type=["numericColumn"], flex=2,
                                           valueFormatter="Math.floor(value).toLocaleString()")
