@@ -526,7 +526,7 @@ if not combined_df.empty:
                 )
                 
                 display_df_for_table = display_df_for_table.sort_values(
-                    ["Tanggal", "Sort_Priority", "Broker"]
+                    ["Tanggal", "Sort_Priority", "Broker"], ascending=[False, True, True]
                 )
                 
                 display_df_for_table = display_df_for_table.drop("Sort_Priority", axis=1)
@@ -549,8 +549,7 @@ if not combined_df.empty:
                 gb_main.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
                 gb_main.configure_column("No", width=80, pinned="left", type=["numericColumn"], flex=0)
                 gb_main.configure_column("Tanggal", minWidth=150, pinned="left", type=["dateColumn"], flex=1,
-                                       valueFormatter="new Date(value).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})",
-                                       sort="desc")
+                                       valueFormatter="new Date(value).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})")
                 gb_main.configure_column("Broker", minWidth=300, pinned="left", flex=3)
                 gb_main.configure_column("Field", minWidth=120, flex=1)
                 gb_main.configure_column("Value", minWidth=200, type=["numericColumn"], flex=2,
