@@ -82,7 +82,7 @@ def configure_aggrid_table(df, table_type="main"):
                            valueFormatter="Number(value).toFixed(2) + '%'", headerName="Market Share (%)")
     
     elif table_type == "ranking":
-        gb.configure_column("Peringkat", width=100, type=["numericColumn"], sort="asc")
+        gb.configure_column("Peringkat", width=100, type=["numericColumn"])
         gb.configure_column("Broker", minWidth=350)
         
         # Dynamic configuration based on columns present
