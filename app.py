@@ -542,6 +542,10 @@ if not combined_df.empty:
                 
                 main_table_df = main_table_df[["No", "Tanggal", "Broker", "Field", "Value", "Percentage"]]
                 
+                # Convert numeric columns to standard Python int/float to avoid BigInt serialization issues
+                main_table_df["Value"] = main_table_df["Value"].astype('int64').astype(int)
+                main_table_df["Percentage"] = main_table_df["Percentage"].astype(float)
+                
                 # Configure AgGrid for main summary table
                 gb_main = GridOptionsBuilder.from_dataframe(main_table_df)
                 gb_main.configure_pagination(enabled=False)
@@ -858,6 +862,11 @@ if not combined_df.empty:
                 df_val, total_val = generate_full_table(filtered_rank_df, "Nilai")
                 
                 if not df_val.empty:
+                    # Convert numeric columns to avoid BigInt serialization issues
+                    df_val["Nilai"] = df_val["Nilai"].astype('int64').astype(int)
+                    df_val["Market Share"] = df_val["Market Share"].astype(float)
+                    df_val["Peringkat"] = df_val["Peringkat"].astype(int)
+                    
                     # Configure AgGrid for ranking table
                     gb_val = GridOptionsBuilder.from_dataframe(df_val)
                     gb_val.configure_pagination(enabled=False)
@@ -895,6 +904,11 @@ if not combined_df.empty:
                 df_freq, total_freq = generate_full_table(filtered_rank_df, "Frekuensi")
                 
                 if not df_freq.empty:
+                    # Convert numeric columns to avoid BigInt serialization issues
+                    df_freq["Frekuensi"] = df_freq["Frekuensi"].astype('int64').astype(int)
+                    df_freq["Market Share"] = df_freq["Market Share"].astype(float)
+                    df_freq["Peringkat"] = df_freq["Peringkat"].astype(int)
+                    
                     # Configure AgGrid for ranking table
                     gb_freq = GridOptionsBuilder.from_dataframe(df_freq)
                     gb_freq.configure_pagination(enabled=False)
@@ -932,6 +946,11 @@ if not combined_df.empty:
                 df_vol, total_vol = generate_full_table(filtered_rank_df, "Volume")
                 
                 if not df_vol.empty:
+                    # Convert numeric columns to avoid BigInt serialization issues
+                    df_vol["Volume"] = df_vol["Volume"].astype('int64').astype(int)
+                    df_vol["Market Share"] = df_vol["Market Share"].astype(float)
+                    df_vol["Peringkat"] = df_vol["Peringkat"].astype(int)
+                    
                     # Configure AgGrid for ranking table
                     gb_vol = GridOptionsBuilder.from_dataframe(df_vol)
                     gb_vol.configure_pagination(enabled=False)
