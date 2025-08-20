@@ -1,47 +1,135 @@
-import streamlit as st
-import pandas as pd
-import re
 import os
-from datetime import datetime
-import plotly.express as px
-from huggingface_hub import HfApi, hf_hub_download, upload_file
+import re
 import uuid
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 import tempfile
 import logging
+from datetime import datetime
 
-# ---------------------------------------------
-# AG Grid safe helper (prevents BigInt errors)
-# ---------------------------------------------
-SAFE_INT = 2**53 - 1
-def aggrid_safe(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert int64/UInt64 to JS-safe values before passing to AgGrid."""
-    out = df.copy()
-    int_like = out.select_dtypes(include=["int64", "Int64", "uint64"]).columns
-    for c in int_like:
-        out[c] = out[c].apply(
-            lambda v: None if pd.isna(v)
-            else (str(int(v)) if abs(int(v)) > SAFE_INT else int(v))
-        )
-    # Ensure datetime is timezone-naive (ISO strings are fine for AgGrid)
-    for col in out.columns:
-        if pd.api.types.is_datetime64_any_dtype(out[col]):
-            out[col] = pd.to_datetime(out[col]).dt.tz_localize(None)
-    return out
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+from huggingface_hub import HfApi, hf_hub_download, upload_file
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
-# Configure logging
+# =========================
+# Basic setup
+# =========================
 logging.basicConfig(level=logging.WARNING)
-
 st.set_page_config(page_title="Ringkasan Broker", layout="wide")
 st.title("📊 Ringkasan Aktivitas Broker Saham")
 
 REPO_ID = "imamdanisworo/broker-storage"
 HF_TOKEN = os.getenv("HF_TOKEN")
+api = HfApi()
 
-# Initialize session state
+# =========================
+# Utilities
+# =========================
+SAFE_INT = 2**53 - 1
+BROKER_REQ_COLS = ["Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"]
+NUMERIC_COLS = ["Volume", "Nilai", "Frekuensi"]
+BROKER_COL = "Broker"
+DATE_COL = "Tanggal"
+
+def aggrid_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert problematic types to JS-serializable values for AG Grid."""
+    out = df.copy()
+    # ints -> safe: use string if exceeds JS safe integer
+    for c in out.select_dtypes(include=["int64", "Int64", "uint64"]).columns:
+        out[c] = out[c].apply(
+            lambda v: None if pd.isna(v) else (str(int(v)) if abs(int(v)) > SAFE_INT else int(v))
+        )
+    # datetime -> timezone-naive
+    for c in out.columns:
+        if pd.api.types.is_datetime64_any_dtype(out[c]):
+            out[c] = pd.to_datetime(out[c]).dt.tz_localize(None)
+    return out
+
+def build_grid(df: pd.DataFrame, config_cb=None, height=400):
+    """Generic AG Grid builder with optional column config callback."""
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_pagination(enabled=False)
+    gb.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
+    gb.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
+    if config_cb:
+        config_cb(gb)
+    grid_options = gb.build()
+    col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
+    with col2:
+        AgGrid(
+            aggrid_safe(df),
+            gridOptions=grid_options,
+            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+            update_mode=GridUpdateMode.MODEL_CHANGED,
+            fit_columns_on_grid_load=True,
+            enable_enterprise_modules=True,
+            height=height,
+            width='100%',
+            reload_data=False
+        )
+
+def format_hover_value(v: float) -> str:
+    if v >= 1_000_000_000_000:
+        return f"{v / 1_000_000_000_000:.4f}T"
+    if v >= 1_000_000_000:
+        return f"{v / 1_000_000_000:.4f}B"
+    return f"{v:,.0f}"
+
+def create_line_chart(df: pd.DataFrame, x: str, y: str, color: str, title: str, percentage=False):
+    if df.empty:
+        return
+    df = df.sort_values(x)
+    colors = ['#1f77b4', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#aec7e8', '#ffbb78']
+    fig = px.line(df, x=x, y=y, color=color, title=title, markers=True, color_discrete_sequence=colors)
+
+    # rich hover
+    if not percentage:
+        for trace in fig.data:
+            name = trace.name
+            sub = df[df[color] == name]
+            hover_texts = [
+                f"<b>{name}</b><br>Tanggal: {d}<br>Nilai: {format_hover_value(v)}"
+                for d, v in zip(sub[x].dt.strftime('%Y-%m-%d'), sub[y])
+            ]
+            trace.update(marker=dict(size=6), hovertemplate="%{text}<extra></extra>", text=hover_texts, legendgroup=name)
+    else:
+        for trace in fig.data:
+            name = trace.name
+            trace.update(marker=dict(size=6), hovertemplate=f"<b>{name}</b><br>Tanggal: %{{x}}<br>Kontribusi: %{{y:.2f}}%<extra></extra>", legendgroup=name)
+
+    # add min/max markers
+    for name in df[color].unique():
+        sub = df[df[color] == name]
+        if len(sub) < 1:
+            continue
+        min_idx, max_idx = sub[y].idxmin(), sub[y].idxmax()
+        min_date, min_val = sub.loc[min_idx, x], float(sub.loc[min_idx, y])
+        max_date, max_val = sub.loc[max_idx, x], float(sub.loc[max_idx, y])
+
+        if percentage:
+            fig.add_scatter(x=[min_date], y=[min_val], mode="markers", marker=dict(color="red", size=6),
+                            name=f"{name} (Min %)", showlegend=False,
+                            hovertemplate=f"<b>{name}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Terendah: {min_val:.2f}%<extra></extra>")
+            fig.add_scatter(x=[max_date], y=[max_val], mode="markers", marker=dict(color="green", size=6),
+                            name=f"{name} (Max %)", showlegend=False,
+                            hovertemplate=f"<b>{name}</b><br>Tanggal: {max_date.strftime('%Y-%m-%d')}<br>Tertinggi: {max_val:.2f}%<extra></extra>")
+        else:
+            fig.add_scatter(x=[min_date], y=[min_val], mode="markers", marker=dict(color="red", size=6),
+                            name=f"{name} (Min)", showlegend=False,
+                            hovertemplate=f"<b>{name}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Terendah: {format_hover_value(min_val)}<extra></extra>")
+            fig.add_scatter(x=[max_date], y=[max_val], mode="markers", marker=dict(color="green", size=6),
+                            name=f"{name} (Max)", showlegend=False,
+                            hovertemplate=f"<b>{name}</b><br>Tanggal: {max_date.strftime('%Y-%m-%d')}<br>Tertinggi: {format_hover_value(max_val)}<extra></extra>")
+
+    fig.update_layout(xaxis_title="Tanggal", yaxis_title=("Percentage (%)" if percentage else "Nilai"), hovermode="closest")
+    st.plotly_chart(fig, use_container_width=True)
+
+# =========================
+# Session state
+# =========================
 if "upload_key" not in st.session_state:
     st.session_state.upload_key = str(uuid.uuid4())
-if "reset_upload_key" in st.session_state and st.session_state.reset_upload_key:
+if st.session_state.get("reset_upload_key"):
     st.session_state.upload_key = str(uuid.uuid4())
     st.session_state.reset_upload_key = False
 if "file_load_status" not in st.session_state:
@@ -49,8 +137,9 @@ if "file_load_status" not in st.session_state:
 if "refresh_trigger" not in st.session_state:
     st.session_state.refresh_trigger = False
 
-api = HfApi()
-
+# =========================
+# Upload area
+# =========================
 @st.cache_data(ttl=3600)
 def list_existing_files():
     try:
@@ -62,929 +151,441 @@ def list_existing_files():
 st.subheader("📤 Upload File Excel")
 st.markdown("Format nama file: `YYYYMMDD_*.xlsx`. Kolom wajib: `Kode Perusahaan`, `Nama Perusahaan`, `Volume`, `Nilai`, `Frekuensi`.")
 
-uploaded_files = st.file_uploader(
-    "Pilih file Excel", 
-    type=["xlsx"], 
-    accept_multiple_files=True,
-    key=st.session_state.upload_key
-)
-
+uploaded_files = st.file_uploader("Pilih file Excel", type=["xlsx"], accept_multiple_files=True, key=st.session_state.upload_key)
 existing_files = list_existing_files()
-upload_success = False
 
 if uploaded_files:
-    for file in uploaded_files:
+    upload_success = False
+    for f in uploaded_files:
         try:
-            match = re.search(r"(\d{8})", file.name)
-            if not match:
-                st.warning(f"⚠️ {file.name} dilewati: nama file tidak mengandung tanggal (YYYYMMDD).")
+            m = re.search(r"(\d{8})", f.name)
+            if not m:
+                st.warning(f"⚠️ {f.name} dilewati: nama file tidak mengandung tanggal (YYYYMMDD).")
                 continue
-            
-            # Validate date
             try:
-                file_date = datetime.strptime(match.group(1), "%Y%m%d").date()
+                datetime.strptime(m.group(1), "%Y%m%d")
             except ValueError:
-                st.warning(f"⚠️ {file.name} dilewati: format tanggal tidak valid.")
+                st.warning(f"⚠️ {f.name} dilewati: format tanggal tidak valid.")
                 continue
 
-            # Read and validate Excel file
             try:
-                df = pd.read_excel(file, sheet_name="Sheet1")
+                df = pd.read_excel(f, sheet_name="Sheet1")
             except Exception as e:
-                st.warning(f"⚠️ {file.name} dilewati: tidak dapat membaca file Excel - {e}")
+                st.warning(f"⚠️ {f.name} dilewati: tidak dapat membaca Excel - {e}")
                 continue
-            
             if df.empty:
-                st.warning(f"⚠️ {file.name} dilewati: file kosong.")
+                st.warning(f"⚠️ {f.name} dilewati: file kosong.")
                 continue
-            
+
             df.columns = df.columns.str.strip()
-            required_columns = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
-            if not required_columns.issubset(df.columns):
-                missing_cols = required_columns - set(df.columns)
-                st.warning(f"⚠️ {file.name} dilewati: kolom tidak lengkap. Missing: {missing_cols}")
+            if not set(BROKER_REQ_COLS).issubset(df.columns):
+                miss = set(BROKER_REQ_COLS) - set(df.columns)
+                st.warning(f"⚠️ {f.name} dilewati: kolom kurang: {miss}")
                 continue
 
-            # Validate numeric columns
-            numeric_cols = ["Volume", "Nilai", "Frekuensi"]
-            for col in numeric_cols:
-                if not pd.api.types.is_numeric_dtype(df[col]):
-                    try:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                        if df[col].isna().any():
-                            st.warning(f"⚠️ {file.name}: Beberapa nilai di kolom {col} tidak valid dan diubah ke 0")
-                            df[col] = df[col].fillna(0)
-                    except:
-                        st.warning(f"⚠️ {file.name} dilewati: kolom {col} tidak dapat dikonversi ke angka.")
-                        continue
+            for col in NUMERIC_COLS:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-            if file.name in existing_files:
-                st.warning(f"⚠️ File '{file.name}' sudah ada dan akan ditimpa.")
+            if f.name in existing_files:
+                st.warning(f"⚠️ File '{f.name}' sudah ada dan akan ditimpa.")
 
-            # Create temporary file for upload
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-                tmp_file.write(file.getbuffer())
-                tmp_file_path = tmp_file.name
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                tmp.write(f.getbuffer())
+                tmp_path = tmp.name
 
             try:
                 upload_file(
-                    path_or_fileobj=tmp_file_path,
-                    path_in_repo=file.name,
+                    path_or_fileobj=tmp_path,
+                    path_in_repo=f.name,
                     repo_id=REPO_ID,
                     repo_type="dataset",
                     token=HF_TOKEN
                 )
-                st.success(f"✅ Berhasil diunggah: {file.name}")
+                st.success(f"✅ Berhasil diunggah: {f.name}")
                 upload_success = True
             finally:
-                # Clean up temporary file
-                if os.path.exists(tmp_file_path):
-                    os.unlink(tmp_file_path)
-
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
         except Exception as e:
-            st.error(f"❌ Gagal memproses {file.name}: {e}")
+            st.error(f"❌ Gagal memproses {f.name}: {e}")
 
     if upload_success:
         st.session_state.reset_upload_key = True
         st.cache_data.clear()
         st.rerun()
 
+# =========================
+# Loading all Excel
+# =========================
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_all_excel():
-    """Optimized loading function with enhanced error handling"""
-    import concurrent.futures
-    from threading import Lock
-    import os
-    
     try:
         all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
     except Exception as e:
         st.error(f"❌ Error accessing repository: {e}")
         return pd.DataFrame(), 0, []
-    
-    xlsx_files = [f for f in all_files if f.endswith(".xlsx")]
 
-    if not xlsx_files:
+    xlsx = sorted([f for f in all_files if f.endswith(".xlsx")], reverse=True)
+    if not xlsx:
         return pd.DataFrame(), 0, []
 
-    xlsx_files.sort(reverse=True)
-
-    all_data = []
-    failed_files = []
-    lock = Lock()
-
+    all_data, failed = [], []
     progress_bar = st.progress(0)
-    status_text = st.empty()
-    total_files = len(xlsx_files)
-    processed_count = 0
+    status = st.empty()
+    total = len(xlsx)
 
-    def process_file(file):
-        """Process a single Excel file with error handling"""
+    for i, file in enumerate(xlsx, start=1):
         try:
-            match = re.search(r"(\d{8})", file)
-            if not match:
-                return None, file
-            
+            m = re.search(r"(\d{8})", file)
+            if not m:
+                failed.append(file); continue
             try:
-                file_date = datetime.strptime(match.group(1), "%Y%m%d").date()
+                file_date = datetime.strptime(m.group(1), "%Y%m%d").date()
             except ValueError:
-                return None, file
+                failed.append(file); continue
 
-            # Check if file exists in cache first
-            cache_dir = "./hf_cache"
-            os.makedirs(cache_dir, exist_ok=True)
+            cache_dir = "./hf_cache"; os.makedirs(cache_dir, exist_ok=True)
             cache_path = os.path.join(cache_dir, file)
-            
             if not os.path.exists(cache_path):
                 try:
-                    path = hf_hub_download(
-                        REPO_ID, 
-                        filename=file, 
-                        repo_type="dataset", 
-                        token=HF_TOKEN,
-                        local_dir=cache_dir,
-                        force_download=False
-                    )
+                    path = hf_hub_download(REPO_ID, filename=file, repo_type="dataset",
+                                           token=HF_TOKEN, local_dir=cache_dir, force_download=False)
                 except Exception:
-                    return None, file
+                    failed.append(file); continue
             else:
                 path = cache_path
 
-            # Read Excel with error handling
             try:
-                df = pd.read_excel(
-                    path, 
-                    sheet_name="Sheet1",
-                    engine='openpyxl'
-                )
+                df = pd.read_excel(path, sheet_name="Sheet1", engine="openpyxl")
             except Exception:
-                return None, file
-            
-            if df.empty:
-                return None, file
-            
-            # Clean and validate data
+                failed.append(file); continue
+
+            if df.empty: failed.append(file); continue
+
             df.columns = df.columns.str.strip()
-            required_columns = {"Kode Perusahaan", "Nama Perusahaan", "Volume", "Nilai", "Frekuensi"}
-            if not required_columns.issubset(df.columns):
-                return None, file
-            
-            # Filter only required columns and clean data
-            df = df[list(required_columns)].copy()
-            
-            # Convert numeric columns with error handling
-            numeric_cols = ["Volume", "Nilai", "Frekuensi"]
-            for col in numeric_cols:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype('int64')
-            
-            # Clean string columns
+            if not set(BROKER_REQ_COLS).issubset(df.columns):
+                failed.append(file); continue
+
+            df = df[BROKER_REQ_COLS].copy()
+            for c in NUMERIC_COLS:
+                df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype("int64")
+
             df["Kode Perusahaan"] = df["Kode Perusahaan"].astype(str).str.strip()
             df["Nama Perusahaan"] = df["Nama Perusahaan"].astype(str).str.strip()
-            
-            # Remove rows with invalid data
-            df = df[
-                (df["Kode Perusahaan"] != '') & 
-                (df["Nama Perusahaan"] != '') &
-                (df[numeric_cols] >= 0).all(axis=1)
-            ]
-            
-            if df.empty:
-                return None, file
-            
-            df["Tanggal"] = file_date
-            return df, None
+            df = df[(df["Kode Perusahaan"] != "") & (df["Nama Perusahaan"] != "")]
+            if df.empty: failed.append(file); continue
 
-        except Exception:
-            return None, file
+            df[DATE_COL] = file_date
+            all_data.append(df)
+        finally:
+            progress_bar.progress(i / total)
+            status.text(f"📁 Loading {i}/{total} files...")
 
-    # Process files with controlled concurrency
-    max_workers = min(8, len(xlsx_files), os.cpu_count() or 1)
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(process_file, file) for file in xlsx_files]
-        
-        for future in concurrent.futures.as_completed(futures):
-            with lock:
-                processed_count += 1
-                progress = processed_count / total_files
-                progress_bar.progress(progress)
-                status_text.text(f"📁 Loading {processed_count}/{total_files} files...")
-            
-            try:
-                df, failed_file = future.result()
-                
-                if df is not None and not df.empty:
-                    with lock:
-                        all_data.append(df)
-                elif failed_file:
-                    with lock:
-                        failed_files.append(failed_file)
-            except Exception:
-                continue
+    progress_bar.empty(); status.empty()
+    if not all_data: return pd.DataFrame(), total, failed
 
-    progress_bar.empty()
-    status_text.empty()
+    combined = pd.concat(all_data, ignore_index=True, copy=False)
+    if combined.empty: return pd.DataFrame(), total, failed
 
-    if not all_data:
-        return pd.DataFrame(), len(xlsx_files), failed_files
+    # Broker name mapping
+    latest_names = (
+        combined.sort_values(DATE_COL)
+        .drop_duplicates("Kode Perusahaan", keep="last")
+        .set_index("Kode Perusahaan")["Nama Perusahaan"]
+    )
+    combined[BROKER_COL] = combined["Kode Perusahaan"].map(latest_names).fillna("Unknown")
+    combined[BROKER_COL] = combined["Kode Perusahaan"] + "_" + combined[BROKER_COL]
 
-    # Optimized concatenation with error handling
-    try:
-        combined = pd.concat(all_data, ignore_index=True, sort=False, copy=False)
-    except Exception as e:
-        st.error(f"❌ Error combining data: {e}")
-        return pd.DataFrame(), len(xlsx_files), failed_files
+    # Market total row per date
+    market_agg = combined.groupby(DATE_COL, as_index=False)[NUMERIC_COLS].sum()
+    market_agg[BROKER_COL] = "Total Market"
+    market_agg["FieldSource"] = "Generated"
+    market_agg["Kode Perusahaan"] = "TOTAL"
+    market_agg["Nama Perusahaan"] = "Total Market"
+    combined = pd.concat([combined, market_agg], ignore_index=True, copy=False)
 
-    if combined.empty:
-        return pd.DataFrame(), len(xlsx_files), failed_files
+    return combined, total, failed
 
-    # Create broker names mapping
-    try:
-        latest_names = (
-            combined.sort_values("Tanggal")
-            .drop_duplicates("Kode Perusahaan", keep="last")
-            .set_index("Kode Perusahaan")["Nama Perusahaan"]
-        )
-        combined["Broker"] = combined["Kode Perusahaan"].map(latest_names).fillna('Unknown')
-        combined["Broker"] = combined["Kode Perusahaan"] + "_" + combined["Broker"]
-    except Exception as e:
-        st.error(f"❌ Error creating broker mapping: {e}")
-        combined["Broker"] = combined["Kode Perusahaan"] + "_" + combined["Nama Perusahaan"]
-
-    # Create market aggregation
-    try:
-        market_aggregated = combined.groupby("Tanggal", as_index=False)[["Volume", "Nilai", "Frekuensi"]].sum()
-        market_aggregated["Broker"] = "Total Market"
-        market_aggregated["FieldSource"] = "Generated"
-        market_aggregated["Kode Perusahaan"] = "TOTAL"
-        market_aggregated["Nama Perusahaan"] = "Total Market"
-        
-        combined = pd.concat([combined, market_aggregated], ignore_index=True, sort=False, copy=False)
-    except Exception as e:
-        st.error(f"❌ Error creating market aggregation: {e}")
-
-    return combined, len(xlsx_files), failed_files
-
-# Load data with error handling
 with st.spinner("Loading data..."):
     try:
         combined_df, file_count, failed_files = load_all_excel()
-        st.session_state.file_load_status["total"] = file_count
-        st.session_state.file_load_status["success"] = file_count - len(failed_files)
-        st.session_state.file_load_status["failed"] = failed_files
+        st.session_state.file_load_status.update(
+            {"total": file_count, "success": file_count - len(failed_files), "failed": failed_files}
+        )
     except Exception as e:
         combined_df = pd.DataFrame()
         st.error(f"⚠️ Gagal memuat data: {e}")
 
-# Display file loading status
-success_count = st.session_state.file_load_status["success"]
-total_count = st.session_state.file_load_status["total"]
-failed_files = st.session_state.file_load_status["failed"]
-
-if total_count > 0:
+# Status
+if st.session_state.file_load_status["total"] > 0:
     st.markdown("---")
     st.markdown("##### 📁 Status Pemuatan File:")
-    st.markdown(f"✅ Berhasil dimuat: {success_count} dari {total_count} file")
-    if failed_files:
+    st.markdown(f"✅ Berhasil dimuat: {st.session_state.file_load_status['success']} dari {st.session_state.file_load_status['total']} file")
+    if st.session_state.file_load_status["failed"]:
         with st.expander("⚠️ File yang gagal dimuat"):
-            st.write(failed_files)
+            st.write(st.session_state.file_load_status["failed"])
 
 if st.button("🔁 Refresh Data"):
     st.cache_data.clear()
     st.session_state.refresh_trigger = True
     st.rerun()
+st.session_state.refresh_trigger = False
 
-if st.session_state.refresh_trigger:
-    st.session_state.refresh_trigger = False
-
-# Main application logic
-if not combined_df.empty:
-    try:
-        combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
-    except Exception as e:
-        st.error(f"❌ Error converting dates: {e}")
-        st.stop()
-
-    with st.expander("⚙️ Filter Data", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            try:
-                unique_brokers = sorted(combined_df["Broker"].unique())
-                default_selection = ["Total Market"] if "Total Market" in unique_brokers else []
-                selected_brokers = st.multiselect("📌 Pilih Broker", unique_brokers, default=default_selection)
-            except Exception as e:
-                st.error(f"❌ Error loading brokers: {e}")
-                selected_brokers = []
-        
-        with col2:
-            selected_fields = st.multiselect("📊 Pilih Jenis Data", ["Volume", "Nilai", "Frekuensi"], default=["Nilai"])
-
-        display_mode = st.radio("🗓️ Mode Tampilan", ["Daily", "Monthly", "Yearly"], horizontal=True)
-
-        try:
-            min_date, max_date = combined_df["Tanggal"].min().date(), combined_df["Tanggal"].max().date()
-            today = datetime.today()
-            year_start = datetime(today.year, 1, 1).date()
-        except Exception as e:
-            st.error(f"❌ Error processing dates: {e}")
-            st.stop()
-
-        if display_mode == "Daily":
-            date_range = st.date_input(
-                "Pilih Rentang Tanggal",
-                value=(year_start, max_date),
-                min_value=min_date,
-                max_value=max_date,
-                help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai"
-            )
-            if isinstance(date_range, tuple) and len(date_range) == 2:
-                date_from, date_to = date_range
-            else:
-                date_from = date_to = None
-        elif display_mode == "Monthly":
-            try:
-                all_months = combined_df["Tanggal"].dt.to_period("M")
-                unique_years = sorted(set(m.year for m in all_months.unique()))
-                selected_years = st.multiselect("Pilih Tahun", unique_years, default=[today.year])
-                months = sorted([m for m in all_months.unique() if m.year in selected_years])
-                selected_months = st.multiselect("Pilih Bulan", months, default=months)
-                if selected_months:
-                    date_from = min(m.to_timestamp() for m in selected_months)
-                    date_to = max((m + 1).to_timestamp() - pd.Timedelta(days=1) for m in selected_months)
-                else:
-                    date_from = date_to = None
-            except Exception as e:
-                st.error(f"❌ Error processing monthly data: {e}")
-                date_from = date_to = None
-        elif display_mode == "Yearly":
-            try:
-                years = sorted(combined_df["Tanggal"].dt.year.unique())
-                selected_years = st.multiselect("Pilih Tahun", years, default=[today.year])
-                if selected_years:
-                    date_from = datetime(min(selected_years), 1, 1).date()
-                    date_to = datetime(max(selected_years), 12, 31).date()
-                else:
-                    date_from = date_to = None
-            except Exception as e:
-                st.error(f"❌ Error processing yearly data: {e}")
-                date_from = date_to = None
-
-    # Validation checks
-    if not selected_brokers:
-        st.warning("❗ Silakan pilih minimal satu broker.")
-    elif not selected_fields:
-        st.warning("❗ Silakan pilih minimal satu jenis data.")
-    elif not date_from or not date_to:
-        st.warning("❗ Rentang tanggal tidak valid.")
-    else:
-        st.markdown("### 📊 Hasil Ringkasan")
-
-        try:
-            filtered_df = combined_df[
-                (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
-                (combined_df["Tanggal"] <= pd.to_datetime(date_to)) &
-                (combined_df["Broker"].isin(selected_brokers))
-            ].copy()
-
-            if filtered_df.empty:
-                st.warning("❗ Tidak ada data untuk filter yang dipilih.")
-            else:
-                # Process data for display
-                melted_df = filtered_df.melt(id_vars=["Tanggal", "Broker"], value_vars=selected_fields,
-                                           var_name="Field", value_name="Value")
-
-                total_market_df = combined_df[combined_df["Broker"] == "Total Market"].melt(
-                    id_vars=["Tanggal", "Broker"],
-                    value_vars=selected_fields,
-                    var_name="Field",
-                    value_name="TotalMarketValue"
-                )
-                total_market_df = total_market_df[["Tanggal", "Field", "TotalMarketValue"]]
-
-                merged_df = pd.merge(melted_df, total_market_df, on=["Tanggal", "Field"], how="left")
-                merged_df["Percentage"] = merged_df.apply(
-                    lambda row: (row["Value"] / row["TotalMarketValue"] * 100) if pd.notna(row["TotalMarketValue"]) and row["TotalMarketValue"] != 0 
-                    else 0.0, axis=1)
-
-                display_df = merged_df.copy()
-
-                # Handle different display modes
-                if display_mode == "Monthly":
-                    # Group by month but keep original dates for calculation
-                    display_df["MonthPeriod"] = display_df["Tanggal"].dt.to_period("M")
-                    monthly_df = display_df.groupby(["MonthPeriod", "Broker", "Field"])["Value"].sum().reset_index()
-                    
-                    # Convert to end of month for display
-                    monthly_df["Tanggal"] = monthly_df["MonthPeriod"].dt.end_time.dt.normalize()
-                    monthly_df = monthly_df.drop("MonthPeriod", axis=1)
-                    
-                    monthly_market_totals = combined_df[
-                        (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
-                        (combined_df["Tanggal"] <= pd.to_datetime(date_to))
-                    ].copy()
-                    monthly_market_totals["MonthPeriod"] = monthly_market_totals["Tanggal"].dt.to_period("M")
-                    
-                    monthly_market_melted = monthly_market_totals[monthly_market_totals["Broker"] == "Total Market"].melt(
-                        id_vars=["MonthPeriod", "Broker"],
-                        value_vars=selected_fields,
-                        var_name="Field",
-                        value_name="MarketTotal"
-                    )
-                    monthly_market_aggregated = monthly_market_melted.groupby(["MonthPeriod", "Field"])["MarketTotal"].sum().reset_index()
-                    monthly_market_aggregated["Tanggal"] = monthly_market_aggregated["MonthPeriod"].dt.end_time.dt.normalize()
-                    monthly_market_aggregated = monthly_market_aggregated.drop("MonthPeriod", axis=1)
-                    
-                    display_df = pd.merge(monthly_df, monthly_market_aggregated, on=["Tanggal", "Field"], how="left")
-                    
-                    display_df["Percentage"] = display_df.apply(
-                        lambda row: (row["Value"] / row["MarketTotal"] * 100) if pd.notna(row["MarketTotal"]) and row["MarketTotal"] != 0 and row["Broker"] != "Total Market"
-                        else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
-                elif display_mode == "Yearly":
-                    # Group by year but keep original dates for calculation
-                    display_df["YearPeriod"] = display_df["Tanggal"].dt.to_period("Y")
-                    yearly_df = display_df.groupby(["YearPeriod", "Broker", "Field"])["Value"].sum().reset_index()
-                    
-                    # Convert to end of year for display
-                    yearly_df["Tanggal"] = yearly_df["YearPeriod"].dt.end_time.dt.normalize()
-                    yearly_df = yearly_df.drop("YearPeriod", axis=1)
-                    
-                    yearly_market_totals = combined_df[
-                        (combined_df["Tanggal"] >= pd.to_datetime(date_from)) &
-                        (combined_df["Tanggal"] <= pd.to_datetime(date_to))
-                    ].copy()
-                    yearly_market_totals["YearPeriod"] = yearly_market_totals["Tanggal"].dt.to_period("Y")
-                    
-                    yearly_market_melted = yearly_market_totals[yearly_market_totals["Broker"] == "Total Market"].melt(
-                        id_vars=["YearPeriod", "Broker"],
-                        value_vars=selected_fields,
-                        var_name="Field",
-                        value_name="MarketTotal"
-                    )
-                    yearly_market_aggregated = yearly_market_melted.groupby(["YearPeriod", "Field"])["MarketTotal"].sum().reset_index()
-                    yearly_market_aggregated["Tanggal"] = yearly_market_aggregated["YearPeriod"].dt.end_time.dt.normalize()
-                    yearly_market_aggregated = yearly_market_aggregated.drop("YearPeriod", axis=1)
-                    
-                    display_df = pd.merge(yearly_df, yearly_market_aggregated, on=["Tanggal", "Field"], how="left")
-                    
-                    display_df["Percentage"] = display_df.apply(
-                        lambda row: (row["Value"] / row["MarketTotal"] * 100) if pd.notna(row["MarketTotal"]) and row["MarketTotal"] != 0 and row["Broker"] != "Total Market"
-                        else (100.0 if row["Broker"] == "Total Market" else 0.0), axis=1)
-
-                # Prepare table data
-                display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
-                display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
-
-                display_df_for_table = display_df[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
-                display_df_for_table["Tanggal Display"] = display_df["Tanggal"].dt.strftime(
-                    '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
-                )
-                
-                display_df_for_table["Sort_Priority"] = display_df_for_table["Broker"].apply(
-                    lambda x: 0 if x == "Total Market" else 1
-                )
-                
-                display_df_for_table = display_df_for_table.sort_values(
-                    ["Tanggal", "Sort_Priority", "Broker"], ascending=[False, True, True]
-                )
-                
-                display_df_for_table = display_df_for_table.drop("Sort_Priority", axis=1)
-                display_df_for_table = display_df_for_table.reset_index(drop=True)
-
-                # Create main table with proper data types
-                main_table_df = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
-                main_table_df["No"] = range(1, len(main_table_df) + 1)
-                
-                # Add raw numeric values for proper sorting
-                main_table_df = pd.merge(main_table_df, display_df[["Tanggal", "Broker", "Field", "Value", "Percentage"]], 
-                                       on=["Tanggal", "Broker", "Field"], how="left")
-                
-                main_table_df = main_table_df[["No", "Tanggal", "Broker", "Field", "Value", "Percentage"]]
-                # (No int64 casting here; aggrid_safe will handle it)
-
-                # Configure AgGrid for main summary table
-                gb_main = GridOptionsBuilder.from_dataframe(main_table_df)
-                gb_main.configure_pagination(enabled=False)
-                gb_main.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
-                gb_main.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                gb_main.configure_column("No", width=80, pinned="left", type=["numericColumn"], flex=0)
-                gb_main.configure_column("Tanggal", minWidth=150, pinned="left", type=["dateColumn"], flex=1,
-                                       valueFormatter="new Date(value).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})")
-                gb_main.configure_column("Broker", minWidth=300, pinned="left", flex=3)
-                gb_main.configure_column("Field", minWidth=120, flex=1)
-                gb_main.configure_column("Value", minWidth=200, type=["numericColumn"], flex=2,
-                                       valueFormatter="'Rp ' + Number(value).toLocaleString()", headerName="Nilai")
-                gb_main.configure_column("Percentage", minWidth=150, type=["numericColumn"], flex=1,
-                                       valueFormatter="Number(value).toFixed(2) + '%'", headerName="Market Share (%)")
-                
-                grid_options_main = gb_main.build()
-                
-                # Center the table using columns
-                col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
-                with col2:
-                    AgGrid(
-                        aggrid_safe(main_table_df),
-                        gridOptions=grid_options_main,
-                        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                        update_mode=GridUpdateMode.MODEL_CHANGED,
-                        fit_columns_on_grid_load=True,
-                        enable_enterprise_modules=True,
-                        height=400,
-                        width='100%',
-                        reload_data=False
-                    )
-
-                # Download functionality (keeps original formatted values)
-                to_download = display_df_for_table[["Tanggal", "Broker", "Field", "Formatted Value", "Formatted %"]].copy()
-                to_download.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
-                csv = to_download.to_csv(index=False).encode("utf-8")
-                st.download_button("⬇️ Unduh Tabel CSV", data=csv, file_name="broker_summary.csv", mime="text/csv")
-
-                # Charts
-                tab1, tab2 = st.tabs(["📈 Nilai", "📊 Kontribusi Terhadap Total (%)"])
-
-                def format_hover_value(value):
-                    if value >= 1_000_000_000_000:
-                        return f"{value / 1_000_000_000_000:.4f}T"
-                    elif value >= 1_000_000_000:
-                        return f"{value / 1_000_000_000:.4f}B"
-                    else:
-                        return f"{value:,.0f}"
-
-                with tab1:
-                    for field in selected_fields:
-                        try:
-                            chart_data = display_df[display_df["Field"] == field].copy()
-                            if chart_data.empty:
-                                continue
-                            
-                            chart_data = chart_data.sort_values("Tanggal")
-                            
-                            broker_colors = ['#1f77b4', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#aec7e8', '#ffbb78']
-                            
-                            fig = px.line(
-                                chart_data,
-                                x="Tanggal",
-                                y="Value",
-                                color="Broker",
-                                title=f"{field} dari waktu ke waktu",
-                                markers=True,
-                                color_discrete_sequence=broker_colors
-                            )
-                            
-                            # Enhance hover information
-                            for i, trace in enumerate(fig.data):
-                                broker_name = trace.name
-                                broker_data = chart_data[chart_data["Broker"] == broker_name]
-                                if not broker_data.empty:
-                                    hover_texts = [f"<b>{broker_name}</b><br>Tanggal: {date}<br>{field}: {format_hover_value(value)}" 
-                                                  for date, value in zip(broker_data["Tanggal"].dt.strftime('%Y-%m-%d'), 
-                                                                       broker_data["Value"])]
-                                    trace.update(
-                                        marker=dict(size=6),
-                                        hovertemplate="%{text}<extra></extra>",
-                                        text=hover_texts,
-                                        legendgroup=broker_name
-                                    )
-                            
-                            # Add min/max markers
-                            for broker in chart_data["Broker"].unique():
-                                broker_data = chart_data[chart_data["Broker"] == broker].copy()
-                                if len(broker_data) > 1:
-                                    min_idx = broker_data["Value"].idxmin()
-                                    max_idx = broker_data["Value"].idxmax()
-                                    
-                                    min_date = broker_data.loc[min_idx, "Tanggal"]
-                                    min_value = broker_data.loc[min_idx, "Value"]
-                                    max_date = broker_data.loc[max_idx, "Tanggal"]
-                                    max_value = broker_data.loc[max_idx, "Value"]
-                                    
-                                    min_formatted = format_hover_value(min_value)
-                                    fig.add_scatter(
-                                        x=[min_date],
-                                        y=[min_value],
-                                        mode="markers",
-                                        marker=dict(color="red", size=6, symbol="circle"),
-                                        name=f"{broker} (Min)",
-                                        showlegend=False,
-                                        legendgroup=broker,
-                                        hovertemplate=f"<b>{broker}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Nilai Terendah: {min_formatted}<extra></extra>"
-                                    )
-                                    
-                                    max_formatted = format_hover_value(max_value)
-                                    fig.add_scatter(
-                                        x=[max_date],
-                                        y=[max_value],
-                                        mode="markers",
-                                        marker=dict(color="green", size=6, symbol="circle"),
-                                        name=f"{broker} (Max)",
-                                        showlegend=False,
-                                        legendgroup=broker,
-                                        hovertemplate=f"<b>{broker}</b><br>Tanggal: {max_date.strftime('%Y-%m-%d')}<br>Nilai Tertinggi: {max_formatted}<extra></extra>"
-                                    )
-                            
-                            fig.update_layout(
-                                xaxis_title="Tanggal",
-                                yaxis_title=field,
-                                hovermode="closest"
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                        except Exception as e:
-                            st.error(f"❌ Error creating chart for {field}: {e}")
-
-                with tab2:
-                    for field in selected_fields:
-                        try:
-                            chart_data = display_df[display_df["Field"] == field].copy()
-                            if chart_data.empty:
-                                continue
-                                
-                            chart_data = chart_data.sort_values("Tanggal")
-                            
-                            broker_colors = ['#1f77b4', '#ff7f0e', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#aec7e8', '#ffbb78']
-                            
-                            fig = px.line(
-                                chart_data,
-                                x="Tanggal",
-                                y="Percentage",
-                                color="Broker",
-                                title=f"Kontribusi {field} (%) dari waktu ke waktu",
-                                markers=True,
-                                color_discrete_sequence=broker_colors
-                            )
-                            
-                            for i, trace in enumerate(fig.data):
-                                broker_name = trace.name
-                                trace.update(
-                                    marker=dict(size=6),
-                                    hovertemplate=f"<b>{broker_name}</b><br>Tanggal: %{{x}}<br>Kontribusi: %{{y:.2f}}%<extra></extra>",
-                                    legendgroup=broker_name
-                                )
-                            
-                            # Add min/max percentage markers
-                            for broker in chart_data["Broker"].unique():
-                                broker_data = chart_data[chart_data["Broker"] == broker].copy()
-                                if len(broker_data) > 1:
-                                    min_idx = broker_data["Percentage"].idxmin()
-                                    max_idx = broker_data["Percentage"].idxmax()
-                                    
-                                    min_date = broker_data.loc[min_idx, "Tanggal"]
-                                    min_percentage = broker_data.loc[min_idx, "Percentage"]
-                                    max_date = broker_data.loc[max_idx, "Tanggal"]
-                                    max_percentage = broker_data.loc[max_idx, "Percentage"]
-                                    
-                                    fig.add_scatter(
-                                        x=[min_date],
-                                        y=[min_percentage],
-                                        mode="markers",
-                                        marker=dict(color="red", size=6, symbol="circle"),
-                                        name=f"{broker} (Min %)",
-                                        showlegend=False,
-                                        legendgroup=broker,
-                                        hovertemplate=f"<b>{broker}</b><br>Tanggal: {min_date.strftime('%Y-%m-%d')}<br>Kontribusi Terendah: {min_percentage:.2f}%<extra></extra>"
-                                    )
-                                    
-                                    fig.add_scatter(
-                                        x=[max_date],
-                                        y=[max_percentage],
-                                        mode="markers",
-                                        marker=dict(color="green", size=6, symbol="circle"),
-                                        name=f"{broker} (Max %)",
-                                        showlegend=False,
-                                        legendgroup=broker,
-                                        hovertemplate=f"<b>{broker}</b><br>Tanggal: {max_date.strftime('%Y-%m-%d')}<br>Kontribusi Tertinggi: {max_percentage:.2f}%<extra></extra>"
-                                    )
-                            
-                            fig.update_layout(
-                                xaxis_title="Tanggal",
-                                yaxis_title="Percentage (%)",
-                                hovermode="closest"
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                        except Exception as e:
-                            st.error(f"❌ Error creating percentage chart for {field}: {e}")
-        
-        except Exception as e:
-            st.error(f"❌ Error processing data: {e}")
-
-# Ranking section
-if not combined_df.empty:
-    st.markdown("---")
-    st.header("🏆 Top Broker Ranking")
-
-    try:
-        combined_df["Tanggal"] = pd.to_datetime(combined_df["Tanggal"])
-
-        mode = st.radio("📅 Mode Tanggal untuk Ranking", ["Harian", "Bulanan"], horizontal=True)
-
-        if mode == "Harian":
-            min_rank_date = datetime(datetime.today().year, 1, 1).date()
-            max_rank_date = combined_df["Tanggal"].max().date()
-
-            rank_date_range = st.date_input(
-                "Pilih Rentang Tanggal untuk Ranking",
-                value=(min_rank_date, max_rank_date),
-                min_value=min_rank_date,
-                max_value=max_rank_date,
-                help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai",
-                key="rank_date_range"
-            )
-            if isinstance(rank_date_range, tuple) and len(rank_date_range) == 2:
-                rank_date_from, rank_date_to = rank_date_range
-            else:
-                rank_date_from = rank_date_to = None
-
-            if rank_date_from is not None and rank_date_to is not None:
-                filtered_rank_df = combined_df[
-                    (combined_df["Tanggal"] >= pd.to_datetime(rank_date_from)) &
-                    (combined_df["Tanggal"] <= pd.to_datetime(rank_date_to)) &
-                    (combined_df["Broker"] != "Total Market")
-                ].copy()
-            else:
-                filtered_rank_df = pd.DataFrame()
-
-        else:  # Bulanan
-            try:
-                combined_df["MonthPeriod"] = combined_df["Tanggal"].dt.to_period("M")
-                all_months = sorted(combined_df["MonthPeriod"].unique())
-                all_years = sorted(set(m.year for m in all_months))
-                current_year = datetime.today().year
-
-                selected_years = st.multiselect(
-                    "📅 Pilih Tahun",
-                    options=all_years,
-                    default=[current_year],
-                    key="rank_year_select"
-                )
-
-                month_options = [m for m in all_months if m.year in selected_years]
-
-                selected_months = st.multiselect(
-                    "📆 Pilih Bulan (bisa lebih dari satu)",
-                    options=month_options,
-                    default=month_options,
-                    format_func=lambda m: m.strftime("%b %Y"),
-                    key="selected_months"
-                )
-
-                if selected_months:
-                    filtered_rank_df = combined_df[
-                        combined_df["MonthPeriod"].isin(selected_months) &
-                        (combined_df["Broker"] != "Total Market")
-                    ].copy()
-                else:
-                    filtered_rank_df = pd.DataFrame()
-            except Exception as e:
-                st.error(f"❌ Error processing monthly ranking data: {e}")
-                filtered_rank_df = pd.DataFrame()
-
-        def generate_full_table(df: pd.DataFrame, column: str):
-            """Generate ranking table with error handling"""
-            try:
-                if df.empty:
-                    return pd.DataFrame(), 0
-                
-                ranked_df = (
-                    df.groupby("Broker")[column].sum()
-                    .sort_values(ascending=False)
-                    .reset_index()
-                )
-                
-                if ranked_df.empty:
-                    return pd.DataFrame(), 0
-                
-                ranked_df["Peringkat"] = range(1, len(ranked_df) + 1)
-                total = ranked_df[column].sum()
-                
-                # Calculate market share percentage
-                if total > 0:
-                    ranked_df["Market Share"] = (ranked_df[column] / total * 100)
-                else:
-                    ranked_df["Market Share"] = 0.0
-                
-                # Reorder columns
-                ranked_df = ranked_df[["Peringkat", "Broker", column, "Market Share"]]
-                
-                return ranked_df, total
-            except Exception as e:
-                st.error(f"❌ Error generating ranking table for {column}: {e}")
-                return pd.DataFrame(), 0
-
-        if not filtered_rank_df.empty:
-            tab_val, tab_freq, tab_vol = st.tabs(["💰 Berdasarkan Nilai", "📈 Berdasarkan Frekuensi", "📊 Berdasarkan Volume"])
-
-            with tab_val:
-                st.subheader("🔝 Peringkat Berdasarkan Nilai")
-                df_val, total_val = generate_full_table(filtered_rank_df, "Nilai")
-                
-                if not df_val.empty:
-                    # Build grid
-                    gb_val = GridOptionsBuilder.from_dataframe(df_val)
-                    gb_val.configure_pagination(enabled=False)
-                    gb_val.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
-                    gb_val.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_val.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0, sort="asc")
-                    gb_val.configure_column("Broker", minWidth=350, pinned="left", flex=3)
-                    gb_val.configure_column("Nilai", minWidth=250, type=["numericColumn"], flex=2,
-                                          valueFormatter="'Rp ' + Number(value).toLocaleString()")
-                    gb_val.configure_column("Market Share", minWidth=180, type=["numericColumn"], flex=1,
-                                          valueFormatter="Number(value).toFixed(2) + '%'")
-                    
-                    grid_options_val = gb_val.build()
-                    
-                    col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
-                    with col2:
-                        AgGrid(
-                            aggrid_safe(df_val),
-                            gridOptions=grid_options_val,
-                            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                            update_mode=GridUpdateMode.MODEL_CHANGED,
-                            fit_columns_on_grid_load=True,
-                            enable_enterprise_modules=True,
-                            height=400,
-                            width='100%',
-                            reload_data=False
-                        )
-                    st.markdown(f"**Total Nilai Seluruh Broker:** Rp {total_val:,.0f}")
-                else:
-                    st.warning("❗ Tidak ada data untuk ranking nilai.")
-
-            with tab_freq:
-                st.subheader("🔝 Peringkat Berdasarkan Frekuensi")
-                df_freq, total_freq = generate_full_table(filtered_rank_df, "Frekuensi")
-                
-                if not df_freq.empty:
-                    gb_freq = GridOptionsBuilder.from_dataframe(df_freq)
-                    gb_freq.configure_pagination(enabled=False)
-                    gb_freq.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
-                    gb_freq.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_freq.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0, sort="asc")
-                    gb_freq.configure_column("Broker", minWidth=350, pinned="left", flex=3)
-                    gb_freq.configure_column("Frekuensi", minWidth=200, type=["numericColumn"], flex=2,
-                                           valueFormatter="Number(value).toLocaleString()")
-                    gb_freq.configure_column("Market Share", minWidth=180, type=["numericColumn"], flex=1,
-                                           valueFormatter="Number(value).toFixed(2) + '%'")
-                    
-                    grid_options_freq = gb_freq.build()
-                    
-                    col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
-                    with col2:
-                        AgGrid(
-                            aggrid_safe(df_freq),
-                            gridOptions=grid_options_freq,
-                            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                            update_mode=GridUpdateMode.MODEL_CHANGED,
-                            fit_columns_on_grid_load=True,
-                            enable_enterprise_modules=True,
-                            height=400,
-                            width='100%',
-                            reload_data=False
-                        )
-                    st.markdown(f"**Total Frekuensi Seluruh Broker:** {total_freq:,.0f} transaksi")
-                else:
-                    st.warning("❗ Tidak ada data untuk ranking frekuensi.")
-
-            with tab_vol:
-                st.subheader("🔝 Peringkat Berdasarkan Volume")
-                df_vol, total_vol = generate_full_table(filtered_rank_df, "Volume")
-                
-                if not df_vol.empty:
-                    gb_vol = GridOptionsBuilder.from_dataframe(df_vol)
-                    gb_vol.configure_pagination(enabled=False)
-                    gb_vol.configure_default_column(groupable=False, value=True, enableRowGroup=False, editable=False, resizable=True, flex=1)
-                    gb_vol.configure_grid_options(domLayout='normal', suppressHorizontalScroll=False)
-                    gb_vol.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0, sort="asc")
-                    gb_vol.configure_column("Broker", minWidth=350, pinned="left", flex=3)
-                    gb_vol.configure_column("Volume", minWidth=200, type=["numericColumn"], flex=2,
-                                          valueFormatter="Number(value).toLocaleString()")
-                    gb_vol.configure_column("Market Share", minWidth=180, type=["numericColumn"], flex=1,
-                                          valueFormatter="Number(value).toFixed(2) + '%'")
-                    
-                    grid_options_vol = gb_vol.build()
-                    
-                    col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
-                    with col2:
-                        AgGrid(
-                            aggrid_safe(df_vol),
-                            gridOptions=grid_options_vol,
-                            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                            update_mode=GridUpdateMode.MODEL_CHANGED,
-                            fit_columns_on_grid_load=True,
-                            enable_enterprise_modules=True,
-                            height=400,
-                            width='100%',
-                            reload_data=False
-                        )
-                    st.markdown(f"**Total Volume Seluruh Broker:** {total_vol:,.0f} lot")
-                else:
-                    st.warning("❗ Tidak ada data untuk ranking volume.")
-                    
-        elif mode == "Harian" and (rank_date_from is None or rank_date_to is None):
-            st.info("📌 Silakan pilih kedua tanggal (mulai dan selesai) untuk melihat data ranking.")
-        else:
-            st.info("📌 Tidak ada data untuk rentang tanggal yang dipilih.")
-    
-    except Exception as e:
-        st.error(f"❌ Error in ranking section: {e}")
-
-else:
+# =========================
+# Main
+# =========================
+if combined_df.empty:
     st.info("⬆️ Silakan unggah file Excel terlebih dahulu.")
+    st.stop()
+
+combined_df[DATE_COL] = pd.to_datetime(combined_df[DATE_COL])
+
+with st.expander("⚙️ Filter Data", expanded=True):
+    left, right = st.columns(2)
+    with left:
+        brokers = sorted(combined_df[BROKER_COL].unique())
+        default_brokers = ["Total Market"] if "Total Market" in brokers else []
+        selected_brokers = st.multiselect("📌 Pilih Broker", brokers, default=default_brokers)
+    with right:
+        selected_fields = st.multiselect("📊 Pilih Jenis Data", NUMERIC_COLS, default=["Nilai"])
+
+    display_mode = st.radio("🗓️ Mode Tampilan", ["Daily", "Monthly", "Yearly"], horizontal=True)
+
+    min_date, max_date = combined_df[DATE_COL].min().date(), combined_df[DATE_COL].max().date()
+    today = datetime.today(); year_start = datetime(today.year, 1, 1).date()
+
+    date_from = date_to = None
+    if display_mode == "Daily":
+        dr = st.date_input("Pilih Rentang Tanggal", value=(year_start, max_date), min_value=min_date, max_value=max_date,
+                           help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai")
+        if isinstance(dr, tuple) and len(dr) == 2:
+            date_from, date_to = dr
+    elif display_mode == "Monthly":
+        periods = combined_df[DATE_COL].dt.to_period("M")
+        years = sorted(set(p.year for p in periods.unique()))
+        sel_years = st.multiselect("Pilih Tahun", years, default=[today.year])
+        months = sorted([p for p in periods.unique() if p.year in sel_years])
+        sel_months = st.multiselect("Pilih Bulan", months, default=months)
+        if sel_months:
+            date_from = min(p.to_timestamp() for p in sel_months)
+            date_to = max((p + 1).to_timestamp() - pd.Timedelta(days=1) for p in sel_months)
+    else:  # Yearly
+        years = sorted(combined_df[DATE_COL].dt.year.unique())
+        sel_years = st.multiselect("Pilih Tahun", years, default=[today.year])
+        if sel_years:
+            date_from = datetime(min(sel_years), 1, 1).date()
+            date_to = datetime(max(sel_years), 12, 31).date()
+
+# validations
+if not selected_brokers:
+    st.warning("❗ Silakan pilih minimal satu broker."); st.stop()
+if not selected_fields:
+    st.warning("❗ Silakan pilih minimal satu jenis data."); st.stop()
+if not date_from or not date_to:
+    st.warning("❗ Rentang tanggal tidak valid."); st.stop()
+
+st.markdown("### 📊 Hasil Ringkasan")
+
+# Filter
+filtered = combined_df[
+    (combined_df[DATE_COL] >= pd.to_datetime(date_from)) &
+    (combined_df[DATE_COL] <= pd.to_datetime(date_to)) &
+    (combined_df[BROKER_COL].isin(selected_brokers))
+].copy()
+
+if filtered.empty:
+    st.warning("❗ Tidak ada data untuk filter yang dipilih.")
+    st.stop()
+
+# Melt + percentage vs Total Market
+melted = filtered.melt(id_vars=[DATE_COL, BROKER_COL], value_vars=selected_fields,
+                       var_name="Field", value_name="Value")
+
+tm = combined_df[combined_df[BROKER_COL] == "Total Market"].melt(
+    id_vars=[DATE_COL, BROKER_COL], value_vars=selected_fields,
+    var_name="Field", value_name="TotalMarketValue"
+)[[DATE_COL, "Field", "TotalMarketValue"]]
+
+merged = pd.merge(melted, tm, on=[DATE_COL, "Field"], how="left")
+merged["Percentage"] = (merged["Value"] / merged["TotalMarketValue"].replace({0: pd.NA})) * 100
+merged["Percentage"] = merged["Percentage"].fillna(0.0)
+
+display_df = merged.copy()
+
+# Monthly / Yearly aggregation for display
+if display_mode == "Monthly":
+    display_df["P"] = display_df[DATE_COL].dt.to_period("M")
+    a = display_df.groupby(["P", BROKER_COL, "Field"])["Value"].sum().reset_index()
+    a[DATE_COL] = a["P"].dt.end_time.dt.normalize(); a.drop(columns="P", inplace=True)
+
+    market = combined_df[(combined_df[DATE_COL] >= pd.to_datetime(date_from)) & (combined_df[DATE_COL] <= pd.to_datetime(date_to))].copy()
+    market["P"] = market[DATE_COL].dt.to_period("M")
+    market = market[market[BROKER_COL] == "Total Market"].melt(id_vars=["P", BROKER_COL], value_vars=selected_fields,
+                                                               var_name="Field", value_name="MarketTotal")
+    market = market.groupby(["P", "Field"])["MarketTotal"].sum().reset_index()
+    market[DATE_COL] = market["P"].dt.end_time.dt.normalize(); market.drop(columns="P", inplace=True)
+
+    display_df = pd.merge(a, market, on=[DATE_COL, "Field"], how="left")
+    display_df["Percentage"] = display_df.apply(
+        lambda r: 100.0 if r[BROKER_COL] == "Total Market"
+        else (r["Value"] / r["MarketTotal"] * 100 if r.get("MarketTotal", 0) else 0.0), axis=1
+    )
+
+elif display_mode == "Yearly":
+    display_df["P"] = display_df[DATE_COL].dt.to_period("Y")
+    a = display_df.groupby(["P", BROKER_COL, "Field"])["Value"].sum().reset_index()
+    a[DATE_COL] = a["P"].dt.end_time.dt.normalize(); a.drop(columns="P", inplace=True)
+
+    market = combined_df[(combined_df[DATE_COL] >= pd.to_datetime(date_from)) & (combined_df[DATE_COL] <= pd.to_datetime(date_to))].copy()
+    market["P"] = market[DATE_COL].dt.to_period("Y")
+    market = market[market[BROKER_COL] == "Total Market"].melt(id_vars=["P", BROKER_COL], value_vars=selected_fields,
+                                                               var_name="Field", value_name="MarketTotal")
+    market = market.groupby(["P", "Field"])["MarketTotal"].sum().reset_index()
+    market[DATE_COL] = market["P"].dt.end_time.dt.normalize(); market.drop(columns="P", inplace=True)
+
+    display_df = pd.merge(a, market, on=[DATE_COL, "Field"], how="left")
+    display_df["Percentage"] = display_df.apply(
+        lambda r: 100.0 if r[BROKER_COL] == "Total Market"
+        else (r["Value"] / r["MarketTotal"] * 100 if r.get("MarketTotal", 0) else 0.0), axis=1
+    )
+
+# Table for display + download
+display_df["Formatted Value"] = display_df["Value"].apply(lambda x: f"{x:,.0f}")
+display_df["Formatted %"] = display_df["Percentage"].apply(lambda x: f"{x:.2f}%")
+
+table_df = display_df[[DATE_COL, BROKER_COL, "Field", "Formatted Value", "Formatted %"]].copy()
+table_df["Tanggal Display"] = display_df[DATE_COL].dt.strftime(
+    '%-d %b %Y' if display_mode == "Daily" else '%b %Y' if display_mode == "Monthly" else '%Y'
+)
+table_df["Sort_Priority"] = table_df[BROKER_COL].eq("Total Market").map({True: 0, False: 1})
+table_df = (table_df.sort_values([DATE_COL, "Sort_Priority", BROKER_COL], ascending=[False, True, True])
+                     .drop(columns="Sort_Priority").reset_index(drop=True))
+
+main_table = table_df[[DATE_COL, BROKER_COL, "Field", "Formatted Value", "Formatted %"]].copy()
+main_table["No"] = range(1, len(main_table) + 1)
+main_table = pd.merge(
+    main_table,
+    display_df[[DATE_COL, BROKER_COL, "Field", "Value", "Percentage"]],
+    on=[DATE_COL, BROKER_COL, "Field"],
+    how="left"
+)[["No", DATE_COL, BROKER_COL, "Field", "Value", "Percentage"]]
+
+def _main_table_cols(gb: GridOptionsBuilder):
+    gb.configure_column("No", width=80, pinned="left", type=["numericColumn"], flex=0)
+    gb.configure_column(DATE_COL, minWidth=150, pinned="left", type=["dateColumn"], flex=1,
+                        valueFormatter="new Date(value).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})")
+    gb.configure_column(BROKER_COL, minWidth=300, pinned="left", flex=3)
+    gb.configure_column("Field", minWidth=120, flex=1)
+    gb.configure_column("Value", minWidth=200, type=["numericColumn"], flex=2,
+                        valueFormatter="'Rp ' + Number(value).toLocaleString()", headerName="Nilai")
+    gb.configure_column("Percentage", minWidth=150, type=["numericColumn"], flex=1,
+                        valueFormatter="Number(value).toFixed(2) + '%'", headerName="Market Share (%)")
+
+build_grid(main_table, config_cb=_main_table_cols, height=400)
+
+# Download CSV
+download_df = table_df[[DATE_COL, BROKER_COL, "Field", "Formatted Value", "Formatted %"]].copy()
+download_df.columns = ["Tanggal", "Broker", "Field", "Value", "%"]
+st.download_button("⬇️ Unduh Tabel CSV", data=download_df.to_csv(index=False).encode("utf-8"),
+                   file_name="broker_summary.csv", mime="text/csv")
+
+# Charts
+tab1, tab2 = st.tabs(["📈 Nilai", "📊 Kontribusi Terhadap Total (%)"])
+with tab1:
+    for f in selected_fields:
+        create_line_chart(display_df[display_df["Field"] == f], DATE_COL, "Value", BROKER_COL, f"{f} dari waktu ke waktu")
+
+with tab2:
+    for f in selected_fields:
+        create_line_chart(display_df[display_df["Field"] == f], DATE_COL, "Percentage", BROKER_COL,
+                          f"Kontribusi {f} (%) dari waktu ke waktu", percentage=True)
+
+# =========================
+# Ranking
+# =========================
+st.markdown("---")
+st.header("🏆 Top Broker Ranking")
+
+mode = st.radio("📅 Mode Tanggal untuk Ranking", ["Harian", "Bulanan"], horizontal=True)
+combined_df[DATE_COL] = pd.to_datetime(combined_df[DATE_COL])
+
+filtered_rank_df = pd.DataFrame()
+if mode == "Harian":
+    min_rank_date = datetime(datetime.today().year, 1, 1).date()
+    max_rank_date = combined_df[DATE_COL].max().date()
+    dr = st.date_input("Pilih Rentang Tanggal untuk Ranking",
+                       value=(min_rank_date, max_rank_date),
+                       min_value=min_rank_date, max_value=max_rank_date,
+                       help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai",
+                       key="rank_date_range")
+    if isinstance(dr, tuple) and len(dr) == 2:
+        start, end = dr
+        filtered_rank_df = combined_df[
+            (combined_df[DATE_COL] >= pd.to_datetime(start)) &
+            (combined_df[DATE_COL] <= pd.to_datetime(end)) &
+            (combined_df[BROKER_COL] != "Total Market")
+        ].copy()
+else:
+    combined_df["MonthPeriod"] = combined_df[DATE_COL].dt.to_period("M")
+    all_months = sorted(combined_df["MonthPeriod"].unique())
+    all_years = sorted(set(m.year for m in all_months))
+    current_year = datetime.today().year
+    years_sel = st.multiselect("📅 Pilih Tahun", options=all_years, default=[current_year], key="rank_year_select")
+    month_opts = [m for m in all_months if m.year in years_sel]
+    months_sel = st.multiselect("📆 Pilih Bulan (bisa lebih dari satu)", options=month_opts, default=month_opts,
+                                format_func=lambda m: m.strftime("%b %Y"), key="selected_months")
+    if months_sel:
+        filtered_rank_df = combined_df[
+            combined_df["MonthPeriod"].isin(months_sel) & (combined_df[BROKER_COL] != "Total Market")
+        ].copy()
+
+def generate_ranking(df: pd.DataFrame, col: str):
+    if df.empty:
+        return pd.DataFrame(), 0.0
+    ranked = (df.groupby(BROKER_COL)[col].sum().sort_values(ascending=False).reset_index())
+    ranked["Peringkat"] = range(1, len(ranked) + 1)
+    total = ranked[col].sum()
+    ranked["Market Share"] = (ranked[col] / total * 100) if total > 0 else 0.0
+    return ranked[["Peringkat", BROKER_COL, col, "Market Share"]], total
+
+def _rank_cols_value(gb: GridOptionsBuilder, value_col: str):
+    gb.configure_column("Peringkat", width=100, pinned="left", type=["numericColumn"], flex=0, sort="asc")
+    gb.configure_column(BROKER_COL, minWidth=350, pinned="left", flex=3)
+    gb.configure_column(value_col, minWidth=250, type=["numericColumn"], flex=2,
+                        valueFormatter=("'Rp ' + Number(value).toLocaleString()" if value_col == "Nilai" else "Number(value).toLocaleString()"))
+    gb.configure_column("Market Share", minWidth=180, type=["numericColumn"], flex=1,
+                        valueFormatter="Number(value).toFixed(2) + '%'")
+
+if not filtered_rank_df.empty:
+    tab_val, tab_freq, tab_vol = st.tabs(["💰 Berdasarkan Nilai", "📈 Berdasarkan Frekuensi", "📊 Berdasarkan Volume"])
+
+    with tab_val:
+        st.subheader("🔝 Peringkat Berdasarkan Nilai")
+        df_val, tot_val = generate_ranking(filtered_rank_df, "Nilai")
+        if not df_val.empty:
+            build_grid(df_val, config_cb=lambda gb: _rank_cols_value(gb, "Nilai"))
+            st.markdown(f"**Total Nilai Seluruh Broker:** Rp {tot_val:,.0f}")
+        else:
+            st.warning("❗ Tidak ada data untuk ranking nilai.")
+
+    with tab_freq:
+        st.subheader("🔝 Peringkat Berdasarkan Frekuensi")
+        df_freq, tot_freq = generate_ranking(filtered_rank_df, "Frekuensi")
+        if not df_freq.empty:
+            build_grid(df_freq, config_cb=lambda gb: _rank_cols_value(gb, "Frekuensi"))
+            st.markdown(f"**Total Frekuensi Seluruh Broker:** {tot_freq:,.0f} transaksi")
+        else:
+            st.warning("❗ Tidak ada data untuk ranking frekuensi.")
+
+    with tab_vol:
+        st.subheader("🔝 Peringkat Berdasarkan Volume")
+        df_vol, tot_vol = generate_ranking(filtered_rank_df, "Volume")
+        if not df_vol.empty:
+            build_grid(df_vol, config_cb=lambda gb: _rank_cols_value(gb, "Volume"))
+            st.markdown(f"**Total Volume Seluruh Broker:** {tot_vol:,.0f} lot")
+        else:
+            st.warning("❗ Tidak ada data untuk ranking volume.")
+elif mode == "Harian":
+    st.info("📌 Silakan pilih kedua tanggal (mulai dan selesai) untuk melihat data ranking.")
+else:
+    st.info("📌 Tidak ada data untuk rentang yang dipilih.")
