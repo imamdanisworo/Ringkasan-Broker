@@ -657,12 +657,15 @@ if not combined_df.empty:
     mode = st.radio("📅 Mode Tanggal untuk Ranking", ["Harian", "Bulanan"], horizontal=True)
 
     if mode == "Harian":
-        min_rank_date = datetime(datetime.today().year, 1, 1).date()
+        min_rank_date = combined_df["Tanggal"].min().date()
         max_rank_date = combined_df["Tanggal"].max().date()
+        
+        # Default to current year range, but allow full data range
+        default_start = max(min_rank_date, datetime(datetime.today().year, 1, 1).date())
 
         rank_date_range = st.date_input(
             "Pilih Rentang Tanggal untuk Ranking",
-            value=(min_rank_date, max_rank_date),
+            value=(default_start, max_rank_date),
             min_value=min_rank_date,
             max_value=max_rank_date,
             help="Klik sekali untuk tanggal mulai, klik kedua untuk tanggal selesai",
